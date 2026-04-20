@@ -14,8 +14,6 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
-      - key: ALLOWED_ORIGINS
-        value: http://localhost:5173
       - key: ALLOW_ALL_EXTENSION_ORIGINS
         value: "false"
       - key: ALLOW_ANONYMOUS_USAGE
@@ -42,8 +40,6 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
-      - key: ALLOWED_ORIGINS
-        value: http://localhost:5173
       - key: ALLOW_ALL_EXTENSION_ORIGINS
         value: "false"
       - key: ALLOW_ANONYMOUS_USAGE

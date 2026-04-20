@@ -72,6 +72,7 @@ function isConfiguredSecret(value: string | undefined) {
 }
 
 const nodeEnv = parseNodeEnv(process.env.NODE_ENV);
+const defaultAllowedOrigins = nodeEnv === 'production' ? '' : 'http://localhost:5173';
 
 export const env = {
   nodeEnv,
@@ -79,7 +80,7 @@ export const env = {
   host: required('HOST', '0.0.0.0'),
   port: parsePort(process.env.PORT, 8787),
   appUrl: required('APP_URL', 'http://localhost:8787'),
-  allowedOrigins: parseList(required('ALLOWED_ORIGINS', 'http://localhost:5173')),
+  allowedOrigins: parseList(required('ALLOWED_ORIGINS', defaultAllowedOrigins)),
   allowedExtensionOrigins: parseList(required('ALLOWED_EXTENSION_ORIGINS')),
   allowAllExtensionOrigins: toBoolean(process.env.ALLOW_ALL_EXTENSION_ORIGINS, nodeEnv !== 'production'),
   allowAnonymousUsage: toBoolean(process.env.ALLOW_ANONYMOUS_USAGE, true),

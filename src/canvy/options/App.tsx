@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import '../shared/app.css';
 import { API_BASE_URL_ENV_KEYS } from '../shared/config';
+import { AppShell, GlassButton, GlassSurface, InlineNotice, MotionProvider, SectionHeader, StatusPill } from '../shared/components/ui';
 import { sendRuntimeMessage } from '../shared/runtime';
 import type { BootstrapPayload, CanvySettings } from '../shared/types';
 
@@ -22,141 +23,155 @@ export function App() {
   }
 
   return (
-    <main className="canvy-options-page">
-      <section className="canvy-options-shell canvy-shell" aria-label="Mako IQ settings">
-        <header className="canvy-header">
-          <div>
-            <div className="canvy-brand-mark">Mako IQ</div>
-            <h2>Extension settings</h2>
-            <p>Popup first. Workspace optional. These settings control local extension behavior only.</p>
-          </div>
-          <span className="canvy-status-pill canvy-status-pill-general">Settings</span>
-        </header>
-
-        <section className="canvy-card">
-          <div className="canvy-card-head">
-            <div>
-              <div className="canvy-eyebrow">Setup</div>
-              <h3>Local preferences</h3>
-            </div>
-          </div>
-
-          <div className="canvy-options-toggle-list">
-            <label className="canvy-panel-toggle">
-              <span>Onboarding complete</span>
-              <input
-                type="checkbox"
-                checked={Boolean(settings?.configured)}
-                onChange={(event) =>
-                  setSettings((current) =>
-                    current
-                      ? {
-                          ...current,
-                          configured: event.target.checked
-                        }
-                      : current
-                  )
-                }
-              />
-            </label>
-
-            <label className="canvy-panel-toggle">
-              <span>Tone consent saved</span>
-              <input
-                type="checkbox"
-                checked={Boolean(settings?.toneConsentGranted)}
-                onChange={(event) =>
-                  setSettings((current) =>
-                    current
-                      ? {
-                          ...current,
-                          toneConsentGranted: event.target.checked
-                        }
-                      : current
-                  )
-                }
-              />
-            </label>
-
-            <label className="canvy-panel-toggle">
-              <span>Motion</span>
-              <input
-                type="checkbox"
-                checked={Boolean(settings?.motionEnabled)}
-                onChange={(event) =>
-                  setSettings((current) =>
-                    current
-                      ? {
-                          ...current,
-                          motionEnabled: event.target.checked
-                        }
-                      : current
-                  )
-                }
-              />
-            </label>
-
-            <label className="canvy-panel-toggle">
-              <span>Debug mode</span>
-              <input
-                type="checkbox"
-                checked={Boolean(settings?.debugMode)}
-                onChange={(event) =>
-                  setSettings((current) =>
-                    current
-                      ? {
-                          ...current,
-                          debugMode: event.target.checked
-                        }
-                      : current
-                  )
-                }
-              />
-            </label>
-          </div>
-
-          <label className="canvy-field">
-            <span className="canvy-field-label">API base URL</span>
-            <input
-              className="canvy-input"
-              type="url"
-              placeholder="http://localhost:8787"
-              value={settings?.apiBaseUrl ?? ''}
-              onChange={(event) =>
-                setSettings((current) =>
-                  current
-                    ? {
-                        ...current,
-                        apiBaseUrl: event.target.value,
-                        apiBaseUrlSource: 'storage'
-                      }
-                    : current
-                )
-              }
+    <MotionProvider>
+      <AppShell surface="options" aria-label="Mako IQ settings">
+        <div className="mako-shell mako-shell--options">
+          <GlassSurface tone="hero">
+            <SectionHeader
+              eyebrow="Settings"
+              title="Extension settings"
+              description="Popup first, workspace intentional, overlay lightweight. These settings stay local to the extension."
+              meta={<StatusPill label="Local" tone="accent" />}
             />
-          </label>
+          </GlassSurface>
 
-          <p className="canvy-muted">
-            Resolved from <strong>{settings?.apiBaseUrlSource ?? 'default'}</strong>. The build-time default comes from{' '}
-            <code>{API_BASE_URL_ENV_KEYS[0]}</code>. Paste only the backend origin here, for example{' '}
-            <code>https://your-service.onrender.com</code>, to override localhost at runtime.
-          </p>
+          <GlassSurface tone="elevated">
+            <SectionHeader
+              eyebrow="Preferences"
+              title="Core controls"
+              description="Keep only the controls that affect how Mako IQ behaves day to day."
+            />
 
-          <div className="canvy-action-row">
-            <button className="canvy-primary canvy-options-primary" type="button" onClick={() => void save()}>
-              Save
-            </button>
-            <button className="canvy-secondary" type="button" onClick={() => window.location.reload()}>
-              Reload
-            </button>
-          </div>
+            <div className="mako-toggle-list">
+              <label className="mako-toggle">
+                <div className="mako-toggle__copy">
+                  <span className="mako-toggle__title">Onboarding complete</span>
+                  <span className="mako-toggle__description">Marks the initial setup flow as finished.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.configured)}
+                  onChange={(event) =>
+                    setSettings((current) =>
+                      current
+                        ? {
+                            ...current,
+                            configured: event.target.checked
+                          }
+                        : current
+                    )
+                  }
+                />
+              </label>
 
-          <p className="canvy-muted">
-            Shortcut: <strong>Ctrl+Shift+Y</strong>. Change it in <code>chrome://extensions/shortcuts</code>.
-          </p>
-          {status ? <div className="canvy-banner">{status}</div> : null}
-        </section>
-      </section>
-    </main>
+              <label className="mako-toggle">
+                <div className="mako-toggle__copy">
+                  <span className="mako-toggle__title">Tone consent saved</span>
+                  <span className="mako-toggle__description">Stores whether tone personalization has already been approved.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.toneConsentGranted)}
+                  onChange={(event) =>
+                    setSettings((current) =>
+                      current
+                        ? {
+                            ...current,
+                            toneConsentGranted: event.target.checked
+                          }
+                        : current
+                    )
+                  }
+                />
+              </label>
+
+              <label className="mako-toggle">
+                <div className="mako-toggle__copy">
+                  <span className="mako-toggle__title">Motion</span>
+                  <span className="mako-toggle__description">Enables the quick glass transitions used across popup, workspace, and overlay.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.motionEnabled)}
+                  onChange={(event) =>
+                    setSettings((current) =>
+                      current
+                        ? {
+                            ...current,
+                            motionEnabled: event.target.checked
+                          }
+                        : current
+                    )
+                  }
+                />
+              </label>
+
+              <label className="mako-toggle">
+                <div className="mako-toggle__copy">
+                  <span className="mako-toggle__title">Debug mode</span>
+                  <span className="mako-toggle__description">Keeps extra diagnostics available for troubleshooting.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.debugMode)}
+                  onChange={(event) =>
+                    setSettings((current) =>
+                      current
+                        ? {
+                            ...current,
+                            debugMode: event.target.checked
+                          }
+                        : current
+                    )
+                  }
+                />
+              </label>
+            </div>
+
+            <label className="mako-field">
+              <span className="mako-field__label">API base URL</span>
+              <input
+                className="mako-input"
+                type="url"
+                placeholder="http://localhost:8787"
+                value={settings?.apiBaseUrl ?? ''}
+                onChange={(event) =>
+                  setSettings((current) =>
+                    current
+                      ? {
+                          ...current,
+                          apiBaseUrl: event.target.value,
+                          apiBaseUrlSource: 'storage'
+                        }
+                      : current
+                  )
+                }
+              />
+            </label>
+
+            <p className="mako-muted">
+              Resolved from <strong>{settings?.apiBaseUrlSource ?? 'default'}</strong>. The build-time default comes from{' '}
+              <code>{API_BASE_URL_ENV_KEYS[0]}</code>. Use only the backend origin here, for example{' '}
+              <code>https://your-service.onrender.com</code>.
+            </p>
+
+            <div className="mako-actions-row">
+              <GlassButton variant="primary" onClick={() => void save()}>
+                Save settings
+              </GlassButton>
+              <GlassButton variant="ghost" onClick={() => window.location.reload()}>
+                Reload
+              </GlassButton>
+            </div>
+
+            <p className="mako-muted">
+              Shortcut: <strong>Ctrl+Shift+Y</strong>. Change it in <code>chrome://extensions/shortcuts</code>.
+            </p>
+
+            {status ? <InlineNotice tone="success">{status}</InlineNotice> : null}
+          </GlassSurface>
+        </div>
+      </AppShell>
+    </MotionProvider>
   );
 }

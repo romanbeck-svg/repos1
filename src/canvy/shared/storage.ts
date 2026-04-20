@@ -172,7 +172,13 @@ export async function setScanState(scanStatus: ScanStatus, scanError?: string) {
     pageState: {
       uiStatus: {
         lifecycle: scanStatus,
-        message: scanError || (scanStatus === 'idle' ? 'No page scan yet.' : scanStatus === 'ready' ? 'Results are ready.' : 'Canvy is working on the current page.')
+        message:
+          scanError ||
+          (scanStatus === 'idle'
+            ? 'No page scan yet.'
+            : scanStatus === 'ready'
+              ? 'Results are ready.'
+              : 'Mako IQ is working on the current page.')
       },
       errors: {
         scan: scanError

@@ -1,5 +1,7 @@
+import { AnimatePresence, m } from 'motion/react';
 import type { AnalysisRunSnapshot, PageAnalysisResult } from '../types';
 import { useDripReveal } from '../hooks/useDripReveal';
+import { GlassButton, GlassSurface, SectionHeader, StatusPill } from './ui';
 
 interface AnalysisResultCardProps {
   analysis?: PageAnalysisResult | null;
@@ -13,8 +15,8 @@ interface AnalysisResultCardProps {
 export function AnalysisResultCard({
   analysis,
   analysisRun,
-  emptyTitle = 'No analysis yet',
-  emptyBody = 'Start an analysis to see Mako IQ summarize and explain the current page.',
+  emptyTitle = 'No answer yet',
+  emptyBody = 'Run an analysis to see the primary answer here first, with notes only when they add value.',
   compact = false,
   onCancel
 }: AnalysisResultCardProps) {
@@ -24,7 +26,7 @@ export function AnalysisResultCard({
     analysisRun.phase !== 'error' &&
     analysisRun.phase !== 'cancelled';
   const shouldShowRunState = Boolean(analysisRun && (isRunning || !analysis));
-  const runTitle = analysisRun?.partialTitle || analysisRun?.pageTitle || 'Scanning the current page';
+  const runTitle = analysisRun?.partialTitle || analysisRun?.pageTitle || 'Preparing the recommended answer';
   const runText = analysisRun?.partialText ?? '';
   const revealedTitle = useDripReveal(runTitle, Boolean(isRunning && runTitle));
   const revealedText = useDripReveal(runText, Boolean(isRunning && runText));
@@ -32,68 +34,80 @@ export function AnalysisResultCard({
 
   if (analysis && !shouldShowRunState) {
     return (
-      <section className={`canvy-card canvy-analysis-card ${compact ? 'canvy-analysis-card-compact' : ''}`}>
-        <div className="canvy-card-head">
-          <div>
-            <div className="canvy-eyebrow">Recommended answer</div>
-            <h3>{analysis.title}</h3>
-          </div>
-        </div>
+      <GlassSurface className="mako-result" tone={compact ? 'soft' : 'elevated'}>
+        <SectionHeader
+          eyebrow="Recommended answer"
+          title={analysis.title}
+          description={analysis.sourceTitle}
+          meta={<StatusPill label="Ready" tone="success" />}
+        />
 
-        <div className="canvy-copy-block canvy-analysis-lead-copy">{analysis.text}</div>
+        <p className="mako-result__body">{analysis.text}</p>
 
         {analysis.bullets.length ? (
-          <div className="canvy-analysis-section">
-            <div className="canvy-eyebrow">Suggested notes</div>
-            <ul className="canvy-list canvy-analysis-list">
+          <div className="mako-stack">
+            <div className="mako-eyebrow">Suggested notes</div>
+            <ul className="mako-result__list">
               {analysis.bullets.map((bullet) => (
                 <li key={bullet}>{bullet}</li>
               ))}
             </ul>
           </div>
         ) : null}
-      </section>
+
+        <div className="mako-result__footer">
+          {analysis.cacheStatus ? <StatusPill label={analysis.cacheStatus.replace('_', ' ')} tone="accent" /> : null}
+          {analysis.suggestedNextActions[0] ? <span className="mako-muted">{analysis.suggestedNextActions[0]}</span> : null}
+        </div>
+      </GlassSurface>
     );
   }
 
   if (analysisRun) {
     return (
-      <section className={`canvy-card canvy-analysis-card ${compact ? 'canvy-analysis-card-compact' : ''}`}>
-        <div className="canvy-card-head">
-          <div>
-            <div className="canvy-eyebrow">Recommended answer</div>
-            <h3>{revealedTitle.displayed}</h3>
-          </div>
-        </div>
+      <GlassSurface className="mako-result" tone={compact ? 'soft' : 'elevated'}>
+        <SectionHeader
+          eyebrow="Recommended answer"
+          title={revealedTitle.displayed}
+          description={analysisRun.statusLabel}
+          meta={<StatusPill label={isRunning ? 'Live' : analysisRun.error ? 'Issue' : 'Finished'} tone={analysisRun.error ? 'danger' : isRunning ? 'accent' : 'success'} />}
+        />
 
-        <p className="canvy-muted">{analysisRun.statusLabel}</p>
-        {isRunning ? <div className="canvy-loading-bar" /> : null}
+        <AnimatePresence initial={false}>
+          {isRunning ? (
+            <m.div
+              key="progress"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="mako-loading-bar"
+            />
+          ) : null}
+        </AnimatePresence>
 
         {runText ? (
-          <div className="canvy-copy-block canvy-analysis-live-copy">
+          <div className="mako-result__body">
             {revealedText.displayed}
-            {showCaret ? <span className="canvy-typing-caret" aria-hidden="true" /> : null}
+            {showCaret ? <span className="mako-typing-caret" aria-hidden="true" /> : null}
           </div>
         ) : null}
 
-        {analysisRun.error ? <div className="canvy-inline-warning">{analysisRun.error}</div> : null}
+        {analysisRun.error ? <div className="mako-notice mako-notice--warning">{analysisRun.error}</div> : null}
 
         {isRunning && onCancel ? (
-          <div className="canvy-action-row">
-            <button className="canvy-secondary" type="button" onClick={onCancel}>
+          <div className="mako-result__footer">
+            <GlassButton variant="secondary" onClick={onCancel}>
               Cancel
-            </button>
+            </GlassButton>
           </div>
         ) : null}
-      </section>
+      </GlassSurface>
     );
   }
 
   return (
-    <section className={`canvy-card canvy-analysis-card ${compact ? 'canvy-analysis-card-compact' : ''}`}>
-      <div className="canvy-eyebrow">Recommended answer</div>
-      <h3>{emptyTitle}</h3>
-      <p className="canvy-muted">{emptyBody}</p>
-    </section>
+    <GlassSurface className="mako-result" tone={compact ? 'soft' : 'default'}>
+      <SectionHeader eyebrow="Recommended answer" title={emptyTitle} description={emptyBody} />
+    </GlassSurface>
   );
 }
