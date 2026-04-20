@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: mako-iq-backend
+    runtime: node
+    plan: free
+    branch: main
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: ALLOWED_ORIGINS
+        value: http://localhost:5173
+      - key: ALLOW_ALL_EXTENSION_ORIGINS
+        value: "false"
+      - key: ALLOW_ANONYMOUS_USAGE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MOONSHOT_API_KEY
+        sync: false
+      - key: ALLOWED_EXTENSION_ORIGINS
+        sync: false
+
+  - type: web
+    name: mako-iq-backend-staging
+    runtime: node
+    plan: free
+    branch: staging
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: ALLOWED_ORIGINS
+        value: http://localhost:5173
+      - key: ALLOW_ALL_EXTENSION_ORIGINS
+        value: "false"
+      - key: ALLOW_ANONYMOUS_USAGE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MOONSHOT_API_KEY
+        sync: false
+      - key: ALLOWED_EXTENSION_ORIGINS
+        sync: false

@@ -1,0 +1,478 @@
+.canvy-host,
+.canvy-host * {
+  box-sizing: border-box;
+}
+
+.canvy-shell {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483646;
+  width: min(432px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(18, 33, 61, 0.09);
+  background:
+    radial-gradient(circle at top right, rgba(45, 127, 249, 0.18), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 255, 0.98) 100%);
+  color: #12213d;
+  box-shadow: 0 28px 90px rgba(18, 35, 75, 0.2);
+  backdrop-filter: blur(16px);
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  animation: canvy-shell-enter 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.canvy-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.canvy-header h2,
+.canvy-card h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.canvy-header p,
+.canvy-card p,
+.canvy-copy-block,
+.canvy-list,
+.canvy-muted {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #52607a;
+}
+
+.canvy-brand-mark,
+.canvy-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #2d7ff9;
+}
+
+.canvy-close {
+  border: 0;
+  background: transparent;
+  color: #41506d;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.canvy-card {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(18, 33, 61, 0.06);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 32px rgba(18, 35, 75, 0.06);
+  animation: canvy-card-enter 220ms ease;
+}
+
+.canvy-hero-card {
+  margin-top: 6px;
+  padding: 18px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(45, 127, 249, 0.12), transparent 38%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  border: 1px solid rgba(18, 33, 61, 0.06);
+  box-shadow: 0 16px 36px rgba(18, 35, 75, 0.08);
+  animation: canvy-card-enter 220ms ease;
+}
+
+.canvy-hero-card h3 {
+  margin: 12px 0 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.canvy-hero-card p {
+  margin: 10px 0 0;
+  color: #52607a;
+  line-height: 1.55;
+}
+
+.canvy-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.canvy-banner,
+.canvy-inline-warning {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.canvy-banner {
+  background: #ebfaf2;
+  color: #0d7a47;
+}
+
+.canvy-inline-warning {
+  background: #fff4df;
+  color: #8a5a00;
+}
+
+.canvy-primary,
+.canvy-secondary,
+.canvy-action-tile {
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+
+.canvy-primary:focus-visible,
+.canvy-secondary:focus-visible,
+.canvy-action-tile:focus-visible,
+.canvy-assignment-card:focus-visible,
+.canvy-workflow-action:focus-visible {
+  outline: 2px solid rgba(19, 115, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.canvy-primary:hover,
+.canvy-secondary:hover,
+.canvy-action-tile:hover,
+.canvy-assignment-card:hover {
+  transform: translateY(-1px);
+}
+
+.canvy-primary:disabled,
+.canvy-secondary:disabled,
+.canvy-action-tile:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.canvy-primary {
+  width: 100%;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #2d7ff9 0%, #1456cc 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 14px 28px rgba(45, 127, 249, 0.25);
+}
+
+.canvy-primary:hover {
+  box-shadow: 0 18px 36px rgba(45, 127, 249, 0.32);
+}
+
+.canvy-secondary {
+  padding: 10px 14px;
+  border: 1px solid rgba(20, 86, 204, 0.12);
+  background: rgba(238, 244, 255, 0.96);
+  color: #133f8f;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+}
+
+.canvy-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.canvy-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.canvy-status-pill-canvas {
+  background: #eef4ff;
+  color: #174ea6;
+}
+
+.canvy-status-pill-general {
+  background: #eef7f2;
+  color: #0d7a47;
+}
+
+.canvy-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2d7ff9 0%, #4fbdff 100%);
+  box-shadow: 0 0 0 0 rgba(45, 127, 249, 0.35);
+  animation: canvy-pulse 2.2s ease infinite;
+}
+
+.canvy-textarea {
+  width: 100%;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(18, 33, 61, 0.12);
+  border-radius: 16px;
+  resize: vertical;
+  background: #fbfcfe;
+  color: #12213d;
+}
+
+.canvy-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.canvy-action-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 102px;
+  padding: 14px;
+  background: #f4f8ff;
+  color: #12213d;
+  text-align: left;
+}
+
+.canvy-action-tile span {
+  font-weight: 600;
+}
+
+.canvy-action-tile small {
+  color: #52607a;
+  line-height: 1.35;
+}
+
+.canvy-chip-row,
+.canvy-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.canvy-message-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.canvy-message {
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.canvy-message-assistant {
+  background: #f4f8ff;
+  color: #174ea6;
+}
+
+.canvy-message-user {
+  align-self: flex-end;
+  background: #eef7f2;
+  color: #0d7a47;
+}
+
+.canvy-assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.canvy-assignment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(18, 33, 61, 0.08);
+  border-radius: 18px;
+  background: #f9fbff;
+  color: #12213d;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.canvy-assignment-card span {
+  color: #52607a;
+  font-size: 12px;
+}
+
+.canvy-assignment-card-selected {
+  border-color: rgba(45, 127, 249, 0.38);
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 1px rgba(45, 127, 249, 0.12);
+}
+
+.canvy-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eff5ff;
+  color: #2d60b5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.canvy-copy-block {
+  white-space: pre-wrap;
+  color: #12213d;
+}
+
+@keyframes canvy-shell-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(16px, 0, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes canvy-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes canvy-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(45, 127, 249, 0.32);
+  }
+
+  70% {
+    box-shadow: 0 0 0 10px rgba(45, 127, 249, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(45, 127, 249, 0);
+  }
+}
+
+.canvy-list {
+  padding-left: 18px;
+}
+
+.canvy-output-explanation {
+  background: #e8f1ff;
+}
+
+.canvy-output-explanation .canvy-copy-block,
+.canvy-output-explanation .canvy-list,
+.canvy-output-explanation p {
+  color: #174ea6;
+}
+
+.canvy-output-success {
+  background: #ebfaf2;
+}
+
+.canvy-output-success .canvy-copy-block,
+.canvy-output-success .canvy-list,
+.canvy-output-success p {
+  color: #0d7a47;
+}
+
+.canvy-assist-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483645;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.canvy-assist-card {
+  position: fixed;
+  width: min(296px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(18, 33, 61, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 18px 56px rgba(18, 35, 75, 0.16);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.canvy-assist-card-docked {
+  right: 18px;
+}
+
+.canvy-assist-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.canvy-assist-snippet {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(45, 127, 249, 0.08);
+  color: #174ea6;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.canvy-assist-body {
+  margin-top: 10px;
+  color: #23324d;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .canvy-shell {
+    top: 8px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    border-radius: 20px;
+  }
+
+  .canvy-action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .canvy-assist-card {
+    right: 8px !important;
+    left: auto !important;
+    width: calc(100vw - 16px);
+  }
+}

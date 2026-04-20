@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Mako IQ",
+  "description": "Mako IQ is a fast, page-aware Chrome assistant for quick scans, concise answers, and optional expanded workflows.",
+  "version": "0.3.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA44OwfvuUFmWAZkbl/9rvzB160kxkYD0XxYX3MFk7hR9MIve8irJy4tiMwo4LmJdVAZUZ4VhK/9JAEAobGAH9GOVQaQoI2A/tLmYp+KWFwsP+M3CuYbN10UCzjIee8v4pK0+6Ylnwai3g61h59EjyTOHFJCzOPKtXcdQUAHkj57lJv2a1f028bg2i07UO8Sp2o5ooZ35aMJDSMrFaVRxyKzrj6FQlhr3S00+/bLQEqTenc272lDZ1AH54JuYiBA9KcGKUry+Z0B4efcfGKpDZq8WdIoGI+vEVS7ZEv0XENFM6O2VQepvCYmNTxb0GIwPB1iHZaGUL2FTsrZGBJ1fEBQIDAQAB",
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Open Mako IQ",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "open-mako-iq": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Open the Mako IQ launcher window"
+    }
+  }
+}
