@@ -71,8 +71,8 @@ import type {
 } from '../shared/types';
 
 const DEFAULT_SHORTCUT_HINT = 'Ctrl+Shift+Y';
-const DEFAULT_ACTION_POPUP_PATH = '';
 const DEFAULT_LAUNCHER_PATH = 'launcher.html';
+const DEFAULT_ACTION_POPUP_PATH = DEFAULT_LAUNCHER_PATH;
 const DEFAULT_SIDEPANEL_PATH = 'sidepanel.html';
 const DEFAULT_LAUNCHER_WIDTH = 440;
 const DEFAULT_LAUNCHER_HEIGHT = 720;
@@ -277,14 +277,18 @@ async function logResolvedApiBaseUrl(reason: string) {
 }
 
 async function readLaunchConfiguration(reason: string): Promise<LaunchConfigurationStatus> {
+  const manifestPopupPath = normalizeExtensionPath(
+    chrome.runtime.getManifest().action?.default_popup,
+    DEFAULT_ACTION_POPUP_PATH
+  );
   const [popupPath, panelBehavior, launcherWindowState] = await Promise.all([
-    chrome.action.getPopup({}).catch(() => DEFAULT_ACTION_POPUP_PATH),
+    chrome.action.getPopup({}).catch(() => manifestPopupPath),
     chrome.sidePanel.getPanelBehavior().catch(() => ({ openPanelOnActionClick: false })),
     getLauncherWindowState().catch(() => null)
   ]);
 
   return {
-    popupPath: normalizeExtensionPath(popupPath, DEFAULT_ACTION_POPUP_PATH),
+    popupPath: normalizeExtensionPath(popupPath, manifestPopupPath),
     launcherPath: DEFAULT_LAUNCHER_PATH,
     sidePanelPath: DEFAULT_SIDEPANEL_PATH,
     openPanelOnActionClick: Boolean(panelBehavior?.openPanelOnActionClick),
@@ -488,6 +492,21 @@ async function createOrFocusLauncherWindow(
   });
 
   return launcherWindow;
+}
+
+async function openLauncherPopup(requestId: string, source: string, windowId?: number) {
+  if (typeof chrome.action.openPopup === 'function') {
+    await chrome.action.openPopup(typeof windowId === 'number' ? { windowId } : undefined);
+    recordRequestDiagnostic('popup:open', 'Opened the action popup.', {
+      context: 'service_worker',
+      requestId,
+      source,
+      detail: `windowId=${typeof windowId === 'number' ? windowId : 'active'}`
+    });
+    return;
+  }
+
+  await createOrFocusLauncherWindow(requestId, `${source}-fallback-window`, windowId);
 }
 
 async function syncLauncherWindowBounds(window: chrome.windows.Window) {
@@ -3984,8 +4003,8 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.commands.onCommand.addListener((command) => {
   logDebug('Command received.', { command });
   if (command === 'open-mako-iq' || command === 'open-canvy') {
-    void createOrFocusLauncherWindow(createRequestId(), 'command').catch((error) => {
-      console.warn('[Mako IQ background] Could not open the launcher window from a command.', {
+    void openLauncherPopup(createRequestId(), 'command').catch((error) => {
+      console.warn('[Mako IQ background] Could not open the launcher popup from a command.', {
         detail: getErrorMessage(error)
       });
     });

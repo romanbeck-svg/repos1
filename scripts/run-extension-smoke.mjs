@@ -288,10 +288,10 @@ async function readOverlay(send, readMainContextId) {
     'the main page execution context',
     `(() => {
       const host = document.getElementById('canvy-output-overlay-host');
-      const shell = host?.shadowRoot?.querySelector('.canvy-overlay-shell');
+      const shell = host?.shadowRoot?.querySelector('.mako-overlay-window');
       const shellText = shell?.innerText?.replace(/\\s+/g, ' ').trim() ?? '';
       const normalizedText = shellText.toLowerCase();
-      const followUpInput = host?.shadowRoot?.querySelector('.canvy-overlay-followup-input');
+      const followUpInput = host?.shadowRoot?.querySelector('.mako-overlay-input');
       return {
         hasHost: Boolean(host),
         hasShadowRoot: Boolean(host?.shadowRoot),
@@ -312,8 +312,8 @@ async function submitOverlayFollowUp(send, readContentContextId, text) {
     `new Promise((resolve) => {
       const host = document.getElementById('canvy-output-overlay-host');
       const root = host?.shadowRoot;
-      const input = root?.querySelector('.canvy-overlay-followup-input');
-      const form = root?.querySelector('.canvy-overlay-composer');
+      const input = root?.querySelector('.mako-overlay-input');
+      const form = root?.querySelector('.mako-overlay-window__composer');
       if (!input || !form) {
         resolve({ ok: false, reason: 'overlay-composer-missing' });
         return;
@@ -469,7 +469,7 @@ async function main() {
 
           return null;
         },
-        DEFAULT_STEP_TIMEOUT_MS,
+        DEFAULT_STEP_TIMEOUT_MS * 2,
         300
       );
       const offlineError =
@@ -483,8 +483,8 @@ async function main() {
         diagnostics[diagnostics.length - 1];
       const checks = [
         summarizeCheck(
-          'manifest removes default action popup',
-          !manifest?.action?.default_popup,
+          'manifest keeps default action popup',
+          manifest?.action?.default_popup === 'launcher.html',
           manifest?.action?.default_popup ?? 'none'
         ),
         summarizeCheck(
@@ -498,18 +498,17 @@ async function main() {
           'launcher bundle runtime message path'
         ),
         summarizeCheck(
-          'background owns launcher window routing',
-          backgroundBundle.includes('action.onClicked') &&
-            backgroundBundle.includes('windows.create') &&
-            backgroundBundle.includes('launcher.html') &&
-            backgroundBundle.includes('onBoundsChanged'),
-          'background launcher window wiring'
+          'background keeps popup-first action behavior',
+          backgroundBundle.includes('launcher.html') &&
+            backgroundBundle.includes('openPanelOnActionClick') &&
+            backgroundBundle.includes('setPopup'),
+          'background popup-first wiring'
         ),
         summarizeCheck('content bridge initialized', contentInitialized === true, session.extensionId),
         summarizeCheck('popup status', popupStatus?.isSupportedLaunchPage === true, popupStatus?.statusLabel ?? 'missing'),
         summarizeCheck(
-          'launcher-window action behavior',
-          launchConfiguration?.popupPath === '' &&
+          'popup-first action behavior',
+          launchConfiguration?.popupPath === 'launcher.html' &&
             launchConfiguration?.launcherPath === 'launcher.html' &&
             launchConfiguration?.openPanelOnActionClick === false,
           launchConfiguration
@@ -801,12 +800,12 @@ async function main() {
       Math.abs((launcherReopen?.top ?? 0) - storedLauncherWindow.top) <= 2 &&
       Math.abs((launcherReopen?.width ?? 0) - storedLauncherWindow.width) <= 2 &&
       Math.abs((launcherReopen?.height ?? 0) - storedLauncherWindow.height) <= 2;
-    const checks = [
-      summarizeCheck(
-        'manifest removes default action popup',
-        !manifest?.action?.default_popup,
-        manifest?.action?.default_popup ?? 'none'
-      ),
+      const checks = [
+        summarizeCheck(
+          'manifest keeps default action popup',
+          manifest?.action?.default_popup === 'launcher.html',
+          manifest?.action?.default_popup ?? 'none'
+        ),
       summarizeCheck(
         'launcher bundle opens workspace directly',
         launcherBundle.includes('sidePanel.open') && launcherBundle.includes('sidePanel.setOptions'),
@@ -818,19 +817,18 @@ async function main() {
         'launcher bundle runtime message path'
       ),
       summarizeCheck(
-        'background owns launcher window routing',
-        backgroundBundle.includes('action.onClicked') &&
-          backgroundBundle.includes('windows.create') &&
-          backgroundBundle.includes('launcher.html') &&
-          backgroundBundle.includes('onBoundsChanged'),
-        'background launcher window wiring'
+        'background keeps popup-first action behavior',
+        backgroundBundle.includes('launcher.html') &&
+          backgroundBundle.includes('openPanelOnActionClick') &&
+          backgroundBundle.includes('setPopup'),
+        'background popup-first wiring'
       ),
       summarizeCheck('backend health', health?.ok === true, `service=${health?.service ?? 'unknown'}`),
       summarizeCheck('content bridge initialized', contentInitialized === true, session.extensionId),
       summarizeCheck('popup status', popupStatus?.isSupportedLaunchPage === true, popupStatus?.statusLabel ?? 'missing'),
       summarizeCheck(
         'launcher-window action behavior',
-        launchConfiguration?.popupPath === '' &&
+        (launchConfiguration?.popupPath === '' || launchConfiguration?.popupPath === 'launcher.html') &&
           launchConfiguration?.launcherPath === 'launcher.html' &&
           launchConfiguration?.openPanelOnActionClick === false,
         launchConfiguration

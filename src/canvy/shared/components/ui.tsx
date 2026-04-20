@@ -1,5 +1,6 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
 import { LazyMotion, domAnimation, m } from 'motion/react';
+import type { HTMLMotionProps } from 'motion/react';
 import { useReducedMotionPreference } from '../hooks/useDripReveal';
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -12,7 +13,7 @@ export function MotionProvider({ children }: { children: ReactNode }) {
   return <LazyMotion features={domAnimation}>{children}</LazyMotion>;
 }
 
-interface AppShellProps extends HTMLAttributes<HTMLElement> {
+interface AppShellProps extends Omit<HTMLMotionProps<'main'>, 'children'> {
   surface: 'popup' | 'panel' | 'options';
   children: ReactNode;
 }
@@ -33,7 +34,7 @@ export function AppShell({ surface, className, children, ...props }: AppShellPro
   );
 }
 
-interface GlassSurfaceProps extends HTMLAttributes<HTMLElement> {
+interface GlassSurfaceProps extends Omit<HTMLMotionProps<'section'>, 'children'> {
   children: ReactNode;
   tone?: 'default' | 'hero' | 'soft' | 'elevated';
   animated?: boolean;
@@ -233,4 +234,3 @@ export function StatTile({ label, value }: StatProps) {
     </div>
   );
 }
-
