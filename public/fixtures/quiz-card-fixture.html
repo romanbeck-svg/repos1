@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mako IQ Quiz Card Fixture</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f4f7fb;
+        color: #172033;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        width: min(920px, calc(100vw - 32px));
+        margin: 48px auto;
+      }
+
+      .quiz-shell {
+        display: grid;
+        gap: 20px;
+      }
+
+      .question-card {
+        display: grid;
+        gap: 8px;
+      }
+
+      .question-card h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.25;
+        font-weight: 760;
+      }
+
+      .question-card p {
+        margin: 0;
+        color: #586174;
+        font-size: 15px;
+      }
+
+      .answers {
+        display: grid;
+        gap: 14px;
+      }
+
+      .answer-card {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) 28px;
+        align-items: center;
+        gap: 16px;
+        min-height: 76px;
+        padding: 16px 18px;
+        border: 1px solid #d7deea;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 14px 32px rgba(39, 53, 82, 0.08);
+        cursor: pointer;
+      }
+
+      .answer-card:focus-visible {
+        outline: 3px solid #40b8ff;
+        outline-offset: 3px;
+      }
+
+      .choice-label {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        background: #e9f2ff;
+        color: #1b5fb8;
+        font-weight: 800;
+      }
+
+      .answer-text {
+        display: grid;
+        gap: 4px;
+      }
+
+      .answer-text span {
+        font-size: 16px;
+        line-height: 1.4;
+      }
+
+      .answer-card svg {
+        width: 24px;
+        height: 24px;
+        color: #8a95a7;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="quiz-shell" data-testid="quiz-question-card">
+        <div class="question-card" data-testid="question-text">
+          <h1>Hans Selye's general adaptation syndrome says which of the following regarding stress?</h1>
+          <p>Select one answer</p>
+        </div>
+
+        <div class="answers" role="radiogroup" aria-label="Answer choices">
+          <div class="answer-card" role="button" tabindex="0" data-testid="answer-card-a">
+            <span class="choice-label">A</span>
+            <div class="answer-text">
+              <span>The body fights hardest against stress during the first stage.</span>
+            </div>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+          </div>
+
+          <div class="answer-card" role="button" tabindex="0" data-testid="answer-card-b">
+            <span class="choice-label">B</span>
+            <div class="answer-text">
+              <span>During the third stage, adrenaline kicks in and the body fights its hardest.</span>
+            </div>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+          </div>
+
+          <div class="answer-card" role="button" tabindex="0" data-testid="answer-card-c">
+            <span class="choice-label">C</span>
+            <div class="answer-text">
+              <span>During the third stage, the body loses the ability to resist stress and becomes exhausted.</span>
+            </div>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+          </div>
+
+          <div class="answer-card" role="button" tabindex="0" data-testid="answer-card-d">
+            <span class="choice-label">D</span>
+            <div class="answer-text">
+              <span>The first stage is about interpreting whether something is stressful or not.</span>
+            </div>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

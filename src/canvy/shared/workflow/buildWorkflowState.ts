@@ -136,7 +136,7 @@ export function buildWorkflowState(input: BuildWorkflowStateInput): WorkflowStat
     updatedAt
   };
 
-  console.info('[Canvy workflow] Workflow state built.', {
+  console.info('[Mako IQ workflow] Workflow state built.', {
     workflowType: workflowState.currentWorkflow,
     latestScanId: workflowState.latestScanId,
     currentAction: workflowState.currentAction,
@@ -184,7 +184,7 @@ export function applyWorkflowAction(input: ApplyWorkflowActionInput): WorkflowSt
     lastUpdatedAt: Date.now()
   };
 
-  console.info('[Canvy workflow] Workflow action applied.', {
+  console.info('[Mako IQ workflow] Workflow action applied.', {
     workflowType: nextState.currentWorkflow,
     actionId: nextState.currentAction,
     hasInstructions: Boolean(nextState.extraInstructions.trim())

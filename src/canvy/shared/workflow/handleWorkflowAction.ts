@@ -4,7 +4,7 @@ import { persistWorkflowState } from './workflowStorage';
 
 export function handleWorkflowAction(input: ApplyWorkflowActionInput) {
   const nextState = applyWorkflowAction(input);
-  console.info('[Canvy workflow] Action clicked.', {
+  console.info('[Mako IQ workflow] Action clicked.', {
     actionId: nextState.currentAction,
     actionLabel: nextState.currentActionLabel,
     workflowType: nextState.currentWorkflow

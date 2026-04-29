@@ -1,7 +1,6 @@
 import { createDefaultPageState } from '../shared/constants';
 import type {
   AssignmentSessionState,
-  PageContextSummary,
   PageStateCurrentPage,
   PageStatePatch,
   PageStateSnapshot,

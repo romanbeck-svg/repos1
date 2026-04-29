@@ -38,7 +38,7 @@ function extractSummary(input: BuildWorkflowOutputInput) {
     input.latestScan?.summary ??
     input.pageContext?.previewText ??
     input.workflowClassification.reasons[0] ??
-    'Canvy is ready to use the current page context.'
+    'Mako IQ is ready to use the current page context.'
   );
 }
 
@@ -118,10 +118,10 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         title: 'Resource workflow output',
         intro:
           input.action.id === 'save_as_context'
-            ? 'Canvy is preserving this scan as reusable source context for later coursework.'
+            ? 'Mako IQ is preserving this scan as reusable source context for later coursework.'
             : input.action.id === 'extract_notes'
-              ? 'Canvy is turning the scan into concise notes you can reuse.'
-              : 'Canvy is treating this page as a study resource and summarizing the strongest takeaways.',
+              ? 'Mako IQ is turning the scan into concise notes you can reuse.'
+              : 'Mako IQ is treating this page as a study resource and summarizing the strongest takeaways.',
         summary:
           input.action.id === 'extract_notes'
             ? trimText(input.latestScan?.summary ?? summary, 220)
@@ -146,7 +146,7 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         ),
         updatedAt
       } satisfies ResourceOutputShell;
-      console.info('[Canvy workflow] Output shell built.', { ...logContext, outputType: resourceShell.type });
+      console.info('[Mako IQ workflow] Output shell built.', { ...logContext, outputType: resourceShell.type });
       return resourceShell;
     }
 
@@ -157,8 +157,8 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         title: 'Assignment helper output',
         intro:
           input.action.id === 'apply_instructions'
-            ? 'Canvy stored your extra assignment requirements and rebuilt the working shell around them.'
-            : 'Canvy is organizing the visible assignment into a task-first workspace.',
+            ? 'Mako IQ stored your extra assignment requirements and rebuilt the working shell around them.'
+            : 'Mako IQ is organizing the visible assignment into a task-first workspace.',
         task: prompt,
         draftAnswer: applyInstructions(
           input.action.id === 'apply_instructions'
@@ -181,7 +181,7 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         ),
         updatedAt
       } satisfies FileAssignmentOutputShell;
-      console.info('[Canvy workflow] Output shell built.', { ...logContext, outputType: fileAssignmentShell.type });
+      console.info('[Mako IQ workflow] Output shell built.', { ...logContext, outputType: fileAssignmentShell.type });
       return fileAssignmentShell;
     }
 
@@ -192,8 +192,8 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         title: 'Discussion workflow output',
         intro:
           input.action.id === 'apply_instructions'
-            ? 'Canvy stored your discussion instructions and refreshed the response shell.'
-            : 'Canvy is turning the visible discussion context into a reply-ready workflow shell.',
+            ? 'Mako IQ stored your discussion instructions and refreshed the response shell.'
+            : 'Mako IQ is turning the visible discussion context into a reply-ready workflow shell.',
         prompt,
         draftResponse: applyInstructions(
           input.action.id === 'draft_response'
@@ -208,7 +208,7 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         ], 4).join(' | '),
         updatedAt
       } satisfies DiscussionOutputShell;
-      console.info('[Canvy workflow] Output shell built.', { ...logContext, outputType: discussionShell.type });
+      console.info('[Mako IQ workflow] Output shell built.', { ...logContext, outputType: discussionShell.type });
       return discussionShell;
     }
 
@@ -219,8 +219,8 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         title: 'Quiz-support output',
         intro:
           input.action.id === 'apply_instructions'
-            ? 'Canvy stored your study instructions and kept the workflow in quiz-safe support mode.'
-            : 'Canvy is staying in quiz-safe mode and focusing on explanation, study support, and concept review.',
+            ? 'Mako IQ stored your study instructions and kept the workflow in quiz-safe support mode.'
+            : 'Mako IQ is staying in quiz-safe mode and focusing on explanation, study support, and concept review.',
         questionSupport: prompt || summary,
         answer: applyInstructions(
           input.action.id === 'prepare_quiz_support'
@@ -234,7 +234,7 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         ),
         updatedAt
       } satisfies QuizOutputShell;
-      console.info('[Canvy workflow] Output shell built.', { ...logContext, outputType: quizShell.type });
+      console.info('[Mako IQ workflow] Output shell built.', { ...logContext, outputType: quizShell.type });
       return quizShell;
     }
 
@@ -245,10 +245,10 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         title: 'General page output',
         intro:
           input.action.id === 'extract_key_points'
-            ? 'Canvy is focusing on the most useful takeaways from the current scan.'
+            ? 'Mako IQ is focusing on the most useful takeaways from the current scan.'
             : input.action.id === 'explain_page'
-              ? 'Canvy is reframing the page in simpler, more actionable terms.'
-              : 'Canvy is using the latest page scan to summarize and organize the current page.',
+              ? 'Mako IQ is reframing the page in simpler, more actionable terms.'
+              : 'Mako IQ is using the latest page scan to summarize and organize the current page.',
         summary:
           input.action.id === 'explain_page'
             ? trimText(`This page mainly centers on ${prompt.toLowerCase()}. ${summary}`, 260)
@@ -269,7 +269,7 @@ export function buildWorkflowOutput(input: BuildWorkflowOutputInput): WorkflowOu
         ),
         updatedAt
       } satisfies GeneralOutputShell;
-      console.info('[Canvy workflow] Output shell built.', { ...logContext, outputType: generalShell.type });
+      console.info('[Mako IQ workflow] Output shell built.', { ...logContext, outputType: generalShell.type });
       return generalShell;
     }
   }

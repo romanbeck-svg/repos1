@@ -7,12 +7,6 @@ interface PromptCandidate {
   score: number;
 }
 
-interface TextLine {
-  text: string;
-  source: PromptExtraction['source'];
-  index: number;
-}
-
 function cleanText(value: string | null | undefined) {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -265,7 +259,7 @@ export function extractPrompt(input: PromptExtractionInput): PromptExtraction {
     confidence
   };
 
-  console.info('[Canvy workflow] Prompt extraction result.', result);
+  console.info('[Mako IQ workflow] Prompt extraction result.', result);
 
   return result;
 }

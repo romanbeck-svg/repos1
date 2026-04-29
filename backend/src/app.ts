@@ -6,6 +6,8 @@ import { authRouter } from './routes/auth.js';
 import { taskRouter } from './routes/tasks.js';
 import { onboardingRouter } from './routes/onboarding.js';
 import { scanRouter } from './routes/scan.js';
+import { screenRouter } from './routes/screen.js';
+import { quizRouter } from './routes/quiz.js';
 import { exportRouter } from './routes/export.js';
 import { billingRouter } from './routes/billing.js';
 import { webhookRouter } from './routes/webhooks.js';
@@ -14,6 +16,7 @@ import { canvasRouter } from './routes/canvas.js';
 import { corsMiddleware, generalLimiter, securityHeaders } from './middleware/security.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { logger } from './lib/logger.js';
+import { markExtensionRequest } from './lib/runtime-status.js';
 
 export function createApp() {
   const app = express();
@@ -23,12 +26,18 @@ export function createApp() {
   app.use((pinoHttp as unknown as (options: { logger: typeof logger }) => ReturnType<typeof express.json>)({ logger }));
   app.use(securityHeaders);
   app.use(corsMiddleware);
+  app.use((req, _res, next) => {
+    markExtensionRequest(req.get('origin') ?? undefined);
+    next();
+  });
   app.use('/health', healthRouter);
   app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }), webhookRouter);
   app.use(express.json({ limit: '6mb' }));
   app.use(generalLimiter);
 
   app.use('/api/analyze', analyzeRouter);
+  app.use('/api/screen', screenRouter);
+  app.use('/api/quiz', quizRouter);
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
   app.use('/api/v1/canvas', canvasRouter);

@@ -2,6 +2,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { env } from '../config/env.js';
+import { logger } from '../lib/logger.js';
 
 export const securityHeaders = helmet({
   crossOriginEmbedderPolicy: false
@@ -18,6 +19,8 @@ function isAllowedOrigin(origin: string) {
     return true;
   }
 
+  // Local-first privacy boundary: extension page data may enter this loopback API,
+  // but it is only accepted from explicitly configured extension origins by default.
   if (origin.startsWith('chrome-extension://')) {
     return env.allowAllExtensionOrigins || env.allowedExtensionOrigins.includes(origin);
   }
@@ -37,6 +40,15 @@ export const corsMiddleware = cors({
       return;
     }
 
+    logger.warn(
+      {
+        origin,
+        allowedOriginsCount: env.allowedOrigins.length,
+        allowedExtensionOriginsCount: env.allowedExtensionOrigins.length,
+        allowAllExtensionOrigins: env.allowAllExtensionOrigins
+      },
+      'cors rejected origin'
+    );
     callback(createHttpError(403, `Origin ${origin} is not allowed by the Mako IQ API.`));
   },
   credentials: true,

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mako IQ Companion</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local desktop companion</p>
+          <h1>Mako IQ Companion</h1>
+        </div>
+        <div class="topbar__actions">
+          <button id="copyDiagnostics" class="button secondary">Copy Diagnostic Report</button>
+          <button id="openHealth" class="button ghost">Open Health</button>
+        </div>
+      </header>
+
+      <section class="status-grid" aria-label="Local status">
+        <article class="status-card">
+          <div class="status-card__header">
+            <span id="extensionDot" class="dot"></span>
+            <h2>Extension</h2>
+          </div>
+          <p id="extensionStatus" class="status-text">Checking connection...</p>
+          <p id="extensionMeta" class="muted">Waiting for a Chrome extension request.</p>
+        </article>
+
+        <article class="status-card">
+          <div class="status-card__header">
+            <span id="backendDot" class="dot"></span>
+            <h2>Backend</h2>
+          </div>
+          <p id="backendStatus" class="status-text">Stopped</p>
+          <p id="backendMeta" class="muted">Port 8787</p>
+        </article>
+
+        <article class="status-card">
+          <div class="status-card__header">
+            <span id="kimiDot" class="dot"></span>
+            <h2>Kimi</h2>
+          </div>
+          <p id="kimiStatus" class="status-text">Checking Kimi...</p>
+          <p id="kimiMeta" class="muted">https://api.moonshot.ai/v1</p>
+        </article>
+
+        <article class="status-card">
+          <div class="status-card__header">
+            <span id="keyDot" class="dot"></span>
+            <h2>API Key</h2>
+          </div>
+          <p id="keyStatus" class="status-text">Checking key...</p>
+          <p id="keyMeta" class="muted">MOONSHOT_API_KEY stays in the backend.</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <p class="eyebrow">Controls</p>
+            <h2>Local Services</h2>
+          </div>
+          <label class="toggle">
+            <input id="launchAtLogin" type="checkbox" />
+            <span>Launch at login</span>
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="startBackend" class="button primary">Start Backend</button>
+          <button id="restartBackend" class="button secondary">Restart Backend</button>
+          <button id="stopBackend" class="button secondary">Stop Backend</button>
+          <button id="testKimi" class="button secondary">Test Kimi + Screen Scan</button>
+          <button id="openLogs" class="button ghost">Open Logs</button>
+        </div>
+
+        <div id="notice" class="notice" hidden></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <p class="eyebrow">Optional local model provider</p>
+            <h2>Ollama</h2>
+          </div>
+        </div>
+
+        <div class="optional-grid">
+          <div>
+            <div class="status-card__header">
+              <span id="ollamaDot" class="dot"></span>
+              <h2>Ollama Status</h2>
+            </div>
+            <p id="ollamaStatus" class="status-text">Optional unless AI_PROVIDER=ollama</p>
+            <p id="ollamaMeta" class="muted">Not checked yet.</p>
+          </div>
+          <div>
+            <div class="status-card__header">
+              <span id="modelDot" class="dot"></span>
+              <h2>Local Model</h2>
+            </div>
+            <p id="modelStatus" class="status-text">Optional</p>
+            <p id="modelMeta" class="muted">Set OLLAMA_MODEL only if using Ollama.</p>
+          </div>
+        </div>
+
+        <div class="button-row optional-actions">
+          <button id="checkOllama" class="button secondary">Check Ollama</button>
+          <button id="pullModel" class="button secondary">Install/Pull Ollama Model</button>
+        </div>
+      </section>
+
+      <section class="panel panel--split">
+        <div>
+          <p class="eyebrow">Last request</p>
+          <h2>AI Request Status</h2>
+          <p id="lastRequest" class="muted">No AI requests yet.</p>
+        </div>
+        <div>
+          <p class="eyebrow">Logs</p>
+          <h2>Backend Logs</h2>
+          <p id="logPath" class="muted path">Log path will appear after startup.</p>
+        </div>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

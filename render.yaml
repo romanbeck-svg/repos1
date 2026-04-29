@@ -14,6 +14,12 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: AI_PROVIDER
+        value: kimi
+      - key: KIMI_BASE_URL
+        value: https://api.moonshot.ai/v1
+      - key: KIMI_MODEL
+        value: kimi-k2.6
       - key: ALLOW_ALL_EXTENSION_ORIGINS
         value: "false"
       - key: ALLOW_ANONYMOUS_USAGE
@@ -40,6 +46,12 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: AI_PROVIDER
+        value: kimi
+      - key: KIMI_BASE_URL
+        value: https://api.moonshot.ai/v1
+      - key: KIMI_MODEL
+        value: kimi-k2.6
       - key: ALLOW_ALL_EXTENSION_ORIGINS
         value: "false"
       - key: ALLOW_ANONYMOUS_USAGE

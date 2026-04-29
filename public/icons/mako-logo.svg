@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Mako IQ logo">
+  <defs>
+    <linearGradient id="makoLogoFill" x1="26" y1="22" x2="102" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <radialGradient id="makoLogoGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(46 30) rotate(55) scale(88)">
+      <stop stop-color="#67E8F9" stop-opacity="0.38"/>
+      <stop offset="0.55" stop-color="#22D3EE" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#05070A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="#05070A"/>
+  <rect x="8" y="8" width="112" height="112" rx="25" fill="url(#makoLogoGlow)"/>
+  <rect x="9" y="9" width="110" height="110" rx="24" fill="none" stroke="#67E8F9" stroke-opacity="0.28" stroke-width="2"/>
+  <path d="M24.8 91.9 43.4 39c.7-2 3.4-2.3 4.6-.5L64 62.4l16-23.9c1.2-1.8 3.9-1.5 4.6.5l18.6 52.9c.7 2-1.5 3.8-3.3 2.7L80.8 83.5a5.5 5.5 0 0 0-6.1.4L64 92.1 53.3 83.9a5.5 5.5 0 0 0-6.1-.4L28.1 94.6c-1.8 1.1-4-0.7-3.3-2.7Z" fill="url(#makoLogoFill)"/>
+  <path d="M45.6 73.3 64 47.2l18.4 26.1" fill="none" stroke="#05070A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M49.8 73.6h28.4" fill="none" stroke="#CFFAFE" stroke-width="6" stroke-linecap="round"/>
+</svg>

@@ -277,6 +277,25 @@ export function buildPageAnalysis(
   const suggestedNextActions = buildSuggestedNextActions(mode, pageContext, canvasContext, likelyUseCase);
 
   return {
+    resultState: 'invalid_ai_output',
+    aiTag: 'error',
+    aiTaggedSuccessfully: false,
+    extractionMode: 'dom',
+    questions: [],
+    candidateQuestionCount: pageContext.questionCandidates.length,
+    answeredQuestionCount: 0,
+    overlayEligible: false,
+    overlaySuppressedReason: 'fallback_plain_text',
+    validation: {
+      modelCallSucceeded: false,
+      finishReason: 'not_applicable',
+      parseSuccess: false,
+      schemaValid: false,
+      echoGuardHit: false,
+      candidateQuestionCount: pageContext.questionCandidates.length,
+      answeredQuestionCount: 0
+    },
+    message: 'Local scan context is available, but the page overlay is reserved for validated AI question-answer results.',
     title: likelyUseCase,
     text: pageSummary,
     bullets: keyTopics,

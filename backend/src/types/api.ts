@@ -10,6 +10,16 @@ export type SubscriptionStatus = 'inactive' | 'trialing' | 'active' | 'past_due'
 export type PageSurfaceType = 'canvas' | 'docs' | 'generic';
 export type ScanSourceMode = 'dom' | 'docs_dom' | 'image_ocr';
 
+export interface QuestionCandidate {
+  id: string;
+  question: string;
+  sectionLabel?: string;
+  nearbyText: string[];
+  answerChoices: string[];
+  sourceAnchor: string;
+  selectorHint?: string;
+}
+
 export interface CanvasAttachment {
   label: string;
   url: string;
@@ -38,6 +48,8 @@ export interface ScanPagePayload {
   url: string;
   readableText: string;
   headings: string[];
+  contentBlocks: string[];
+  questionCandidates: QuestionCandidate[];
   sourceType: 'reference' | 'tone_sample';
   pageType?: PageSurfaceType;
   sourceMode?: ScanSourceMode;

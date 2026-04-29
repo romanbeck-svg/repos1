@@ -45,7 +45,7 @@ export function ContextSnapshot({ context, canvasApiSummary, pageContext, latest
         <p className="canvy-muted">
           {pageContext?.previewText
             ? `${pageContext.previewText.slice(0, 260)}${pageContext.previewText.length > 260 ? '...' : ''}`
-            : 'Canvy is ready to read the title, URL, and visible page text here.'}
+            : 'Mako IQ is ready to read the title, URL, and visible page text here.'}
         </p>
         {latestScan ? (
           <div className="canvy-panel-inline-result">
@@ -64,8 +64,8 @@ export function ContextSnapshot({ context, canvasApiSummary, pageContext, latest
         <h3>{latestScan?.title ?? 'Open a Canvas page to unlock enhanced workflows'}</h3>
         <p>
           {latestScan
-            ? `Canvy scanned this ${latestScan.pageType ?? 'page'} using ${latestScan.sourceMode ?? 'dom'} extraction.`
-            : 'Canvy looks for course, assignment, discussion, file, and quiz-review context on the page you have open.'}
+            ? `Mako IQ scanned this ${latestScan.pageType ?? 'page'} using ${latestScan.sourceMode ?? 'dom'} extraction.`
+            : 'Mako IQ looks for course, assignment, discussion, file, and quiz-review context on the page you have open.'}
         </p>
         {latestScan?.extractionNotes?.length ? (
         <div className="canvy-chip-row">
@@ -101,7 +101,7 @@ export function ContextSnapshot({ context, canvasApiSummary, pageContext, latest
       <p className="canvy-muted">
         {context.promptText
           ? `${context.promptText.slice(0, 220)}${context.promptText.length > 220 ? '...' : ''}`
-          : 'Canvy found limited prompt text on this page.'}
+          : 'Mako IQ found limited prompt text on this page.'}
       </p>
       {latestScan ? (
         <div className="canvy-panel-inline-result">

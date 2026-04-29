@@ -5,10 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:extension": "vite",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:companion": "npm --prefix apps/companion run dev",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && vite build && vite build --config vite.content.config.ts",
+    "build": "npm run build:extension && npm run build:backend && npm run build:companion",
+    "build:extension": "npm run typecheck && vite build && vite build --config vite.content.config.ts",
+    "build:backend": "npm --prefix backend run build",
+    "build:companion": "npm --prefix apps/companion run build",
+    "package:companion": "npm run build:backend && npm --prefix apps/companion run package",
+    "local:doctor": "node scripts/local-doctor.mjs",
     "preview": "vite preview",
-    "smoke:extension": "node scripts/run-extension-smoke.mjs"
+    "smoke:extension": "node scripts/run-extension-smoke.mjs",
+    "smoke:quiz-mode": "node scripts/quiz-mode-smoke.mjs"
   },
   "dependencies": {
     "motion": "^12.38.0",

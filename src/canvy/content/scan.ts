@@ -2,7 +2,8 @@ import { buildPageAnalysis } from '../shared/analysis';
 import { detectAssistantMode, detectPageType as detectLmsPageType, isCanvasUrl } from '../shared/lms';
 import type { PageAssistTarget, PageContextSummary, PageSurfaceType, ScanPagePayload, ScanSourceMode } from '../shared/types';
 import { extractCanvasContext } from './canvas';
-import { cleanExtractedText, extractReadableContent, uniqueCleanText } from './extraction';
+import { cleanExtractedText, extractQuestionCandidates, extractReadableContent, uniqueCleanText } from './extraction';
+import { extractPageQuestionsFast } from './screenContext';
 
 interface BaseScanExtraction {
   title: string;
@@ -10,6 +11,8 @@ interface BaseScanExtraction {
   hostname: string;
   readableText: string;
   headings: string[];
+  contentBlocks: string[];
+  questionCandidates: ScanPagePayload['questionCandidates'];
   sourceType: ScanPagePayload['sourceType'];
   pageType: PageSurfaceType;
   sourceMode: ScanSourceMode;
@@ -62,6 +65,8 @@ function buildPageContextFromExtraction(extraction: BaseScanExtraction): PageCon
     domain: extraction.hostname,
     pageType: extraction.pageType,
     headings: extraction.headings,
+    contentBlocks: extraction.contentBlocks,
+    questionCandidates: extraction.questionCandidates,
     previewText,
     priorityText,
     textLength: extraction.readableText.length,
@@ -82,6 +87,40 @@ function detectSectionsFromText(headings: string[], readableText: string) {
   return uniqueCleanText([...headings, ...sectionCandidates], 8);
 }
 
+function mergeQuestionCandidates(...groups: ScanPagePayload['questionCandidates'][]) {
+  const seen = new Set<string>();
+  const results: ScanPagePayload['questionCandidates'] = [];
+
+  groups.flat().forEach((candidate) => {
+    const key = cleanExtractedText(candidate.question).toLowerCase();
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    results.push(candidate);
+  });
+
+  return results.slice(0, 10);
+}
+
+function extractFastQuestionCandidates(): ScanPagePayload['questionCandidates'] {
+  try {
+    const extraction = extractPageQuestionsFast();
+    return extraction.questions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      sectionLabel: question.questionType.replace('_', ' '),
+      nearbyText: question.nearbyContext ? [question.nearbyContext] : [],
+      answerChoices: question.choices.map((choice) => `${choice.key}. ${choice.text}`),
+      sourceAnchor: question.id,
+      selectorHint: question.domHints.selector
+    }));
+  } catch (error) {
+    console.warn('[Mako IQ content] Fast question extraction failed; using legacy extraction.', error);
+    return [];
+  }
+}
+
 function buildScanPayload(extraction: BaseScanExtraction): ScanPagePayload {
   const finalized = finalizeExtraction(extraction);
   const mode = detectAssistantMode(finalized.url);
@@ -99,6 +138,8 @@ function buildScanPayload(extraction: BaseScanExtraction): ScanPagePayload {
     readableText: finalized.readableText,
     keyText: pageContext.previewText,
     headings: finalized.headings,
+    contentBlocks: finalized.contentBlocks,
+    questionCandidates: finalized.questionCandidates,
     detectedSections,
     sourceType: finalized.sourceType,
     scanSource: finalized.sourceType === 'tone_sample' ? 'tone_sample_capture' : 'manual_scan',
@@ -208,6 +249,7 @@ function scanDocsPage(sourceType: ScanPagePayload['sourceType']): ScanPagePayloa
   const readableContent = extractReadableContent('docs');
   const readableText = readableContent.readableText || readableContent.previewText;
   const headings = readableContent.headings.length ? readableContent.headings : [getDocsTitle()].filter(Boolean);
+  const questionCandidates = mergeQuestionCandidates(extractFastQuestionCandidates(), extractQuestionCandidates('docs'));
 
   return buildScanPayload({
     title: getDocsTitle() || 'Google Doc',
@@ -215,6 +257,8 @@ function scanDocsPage(sourceType: ScanPagePayload['sourceType']): ScanPagePayloa
     hostname: window.location.hostname.replace(/^www\./i, ''),
     readableText,
     headings,
+    contentBlocks: readableContent.blocks.slice(0, 24),
+    questionCandidates,
     sourceType,
     pageType: 'docs',
     sourceMode: 'docs_dom',
@@ -230,6 +274,7 @@ function scanGenericPage(sourceType: ScanPagePayload['sourceType'], pageType: Pa
   const readableContent = extractReadableContent(pageType);
   const readableText = readableContent.readableText || readableContent.previewText;
   const headings = readableContent.headings;
+  const questionCandidates = mergeQuestionCandidates(extractFastQuestionCandidates(), extractQuestionCandidates(pageType));
 
   return buildScanPayload({
     title: cleanExtractedText(document.title) || 'Scanned page',
@@ -237,6 +282,8 @@ function scanGenericPage(sourceType: ScanPagePayload['sourceType'], pageType: Pa
     hostname: window.location.hostname.replace(/^www\./i, ''),
     readableText,
     headings,
+    contentBlocks: readableContent.blocks.slice(0, 24),
+    questionCandidates,
     sourceType,
     pageType,
     sourceMode: 'dom',

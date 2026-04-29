@@ -1,5 +1,7 @@
 # Render Deployment Guide
 
+Render is optional. Normal Mako IQ use is local-first through Mako IQ Companion, the local backend at `http://127.0.0.1:8787`, and Kimi/Moonshot from that backend. Use this guide only when you intentionally want a hosted backend.
+
 This repo is prepared so [romanbeck-svg/repos1](https://github.com/romanbeck-svg/repos1) can be the GitHub source of truth for Render deployment.
 
 ## Source Of Truth
@@ -33,6 +35,9 @@ Enter these in the Render dashboard for the production backend service:
 ```text
 NODE_ENV=production
 HOST=0.0.0.0
+AI_PROVIDER=kimi
+KIMI_BASE_URL=https://api.moonshot.ai/v1
+KIMI_MODEL=kimi-k2.6
 ALLOW_ALL_EXTENSION_ORIGINS=false
 ALLOW_ANONYMOUS_USAGE=true
 MOONSHOT_API_KEY=YOUR_REAL_MOONSHOT_KEY

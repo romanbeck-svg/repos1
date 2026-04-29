@@ -1,25 +1,28 @@
 # Mako IQ Extension Shell
 
-Mako IQ is a **page-aware Chrome extension shell** that works on any normal webpage and gets better on **Canvas** through an enhanced LMS-aware layer.
+Mako IQ is a **screen-aware Chrome extension** that analyzes the visible tab screenshot and places transparent answer bubbles near detected questions or tasks.
 
-This revision keeps the product intentionally lightweight:
+This revision keeps the product local-first for normal use:
 
-- popup-first launcher flow from the toolbar
-- compact popup as the primary UX
-- optional Chrome side panel workspace on all normal webpages
-- Canvas-enhanced mode when LMS context is detected
-- popup launcher with a single primary `Scan page` action
-- keyboard shortcut to open the side panel
-- backend-connected workflow generation with local fallback
+- popup-first `Analyze Screen` launcher flow from the toolbar
+- screenshot capture through the MV3 background service worker
+- backend analysis through the local Mako IQ Companion app
+- Kimi/Moonshot as the default AI provider through the local backend
+- transparent content-script answer bubbles anchored to detected question regions
+- optional Chrome side panel workspace for history, notes, follow-up chat, and settings
+- Ollama as an optional local model provider only when explicitly configured
 
-It still does **not** include billing, downloads, or quiz overlays.
+It does **not** include stealth, proctoring bypass, hidden screen-share behavior, or restricted-assessment answer tooling.
+
+Render is no longer required for normal use. See `docs/LOCAL_FIRST_SETUP.md`.
 
 ## Active source of truth
 
 - Active extension source is `src/canvy/**` and `public/manifest.json`.
 - Active backend source is `backend/src/**`.
+- Active companion source is `apps/companion/**`.
 - `dist/**` is build output only (do not edit manually).
-- Legacy trees such as `src/**` (outside `src/canvy`) and `chrome-extension/**` are kept for reference and are not part of the active build.
+- The historical `src/canvy` path and `CANVY_*` message/storage names remain as internal compatibility names. User-facing copy should use Mako IQ.
 
 ## Updated folder structure
 
@@ -30,14 +33,20 @@ public/
 
 src/canvy/
   background/
-    main.ts                MV3 service worker, side panel orchestration
+    main.ts                MV3 service worker, screenshot capture, side panel orchestration
     mockAssignments.ts     Legacy local fallback assignment feed
   content/
-    main.tsx               Content-script bridge for page extraction only
+    main.tsx               Content-script bridge for page extraction and bubble rendering
+    assistantPanel.ts      In-page assistant panel shell
+    overlayUi.ts           Shared overlay DOM/button helpers
+    screenBubbles.ts       Transparent answer bubbles for screenshot analysis
+    screenContext.ts       Compact DOM/screen context extractor
+    screenPageWatcher.ts   Clears stale answer context after navigation or page changes
     pageContext.ts         Universal page context extraction
     canvas.ts              Canvas-specific enhancer layer
-    SidebarApp.tsx         Legacy injected-shell component (no longer primary)
     sidebar.css            Shared Mako IQ workspace styling
+    quiz/                  Quiz Mode extraction, hashing, and screenshot fallback helpers
+    overlay/               Workflow output overlay
     components/
       ActionTiles.tsx
       Composer.tsx
@@ -49,48 +58,66 @@ src/canvy/
     components/
       PanelTabs.tsx        Top-level workspace tabs
   popup/
-    App.tsx                Popup launcher and page status UI
+    App.tsx                Screen assistant launcher
     main.tsx
   options/
     App.tsx                Local shell configuration page
     main.tsx
   shared/
     app.css                Shared visual tokens
+    answerFormat.ts        Frontend answer/confidence normalization
     config.ts              Local config helpers
     constants.ts           Default settings/session state
     analysis.ts            Rule-based page analysis helper
     lms.ts                 Page detection + launch support logic
     runtime.ts             Runtime message helpers
     storage.ts             chrome.storage wrapper
+    quizTypes.ts           Quiz Mode frontend/backend contracts
     types.ts               Shared extension contracts
+
+backend/src/
+  app.ts                   Express app and route mounting
+  server.ts                Backend entry point
+  routes/                  Health, analyze, screen, quiz, task, auth, and export routes
+  services/                AI normalization, screen analysis, quiz analysis, safety, and usage
+  ai/                      Kimi/Moonshot and Ollama provider helpers
+  config/env.ts            Environment loading and startup validation
+
+apps/companion/
+  src/main.js              Electron tray app and backend process manager
+  src/preload.js           Safe renderer IPC bridge
+  src/renderer/            Status window UI
 ```
 
-## How universal mode vs Canvas-enhanced mode works
+## Local desktop architecture
 
-### Universal mode
+```text
+Chrome extension
+  -> Mako IQ Companion for Windows
+  -> local backend at http://127.0.0.1:8787
+  -> Kimi/Moonshot API at https://api.moonshot.ai/v1
+```
+
+The companion app manages the existing backend. It starts the backend at login, keeps a tray menu available, restarts the backend if it crashes, shows whether Kimi and `MOONSHOT_API_KEY` are configured, can test `/health/ai?test=true`, and exposes logs and diagnostics. The extension never calls Kimi, Moonshot, Ollama, or any other AI provider directly.
+
+## How screen analysis works
 
 On any normal `http` or `https` page, Mako IQ can:
 
-- open the Chrome side panel
-- read the page title
-- read the page URL
-- read a useful portion of visible page text
-- show general assistant/help UI
+- capture the visible tab screenshot
+- send the screenshot to the backend vision route
+- receive structured question/task answers with normalized coordinates
+- render transparent answer bubbles near detected screen regions
+- open the Chrome side panel as an optional workspace
+- optionally enable Quiz Mode, which watches for visible question changes, clears stale bubbles, and prefetches study suggestions without clicking or submitting anything
 
-This runs through `content/pageContext.ts`, which gives the extension a lightweight page summary.
+This runs through `CAPTURE_VISIBLE_SCREEN` in the background service worker and `RENDER_ANSWER_BUBBLES` in the content script.
 
-### Canvas-enhanced mode
+Quiz Mode is documented in `docs/QUIZ_MODE.md`.
 
-If the current page matches Canvas patterns, Mako IQ layers Canvas-specific behavior on top:
+## Legacy Canvas layer
 
-- Canvas-aware messaging
-- Canvas context summary
-- assignment cards from Canvas API context when available
-- future-ready hook points for assignment-aware flows
-
-This runs through `content/canvas.ts`, with backend Canvas context calls from the service worker.
-
-Canvas is now an **enhancer**, not a gate.
+Canvas-specific extraction and API code still exists as a legacy context layer, but it is not the primary product flow. Keep it behind future feature flags unless a later product decision reintroduces LMS integrations.
 
 ## Why the prior sidebar approach was unreliable
 
@@ -104,7 +131,7 @@ The previous implementation rendered the main workspace by injecting a React sid
 
 That path is still useful for future inline helpers, but it is not a reliable core container for the main assistant surface.
 
-Mako IQ now uses Chrome&apos;s real **Side Panel API** as an optional expanded workspace. Content scripts are only responsible for page detection and context extraction.
+Mako IQ now uses content-script bubbles as the immediate answer surface and Chrome&apos;s real **Side Panel API** as an optional expanded workspace.
 
 ## Popup behavior
 
@@ -112,12 +139,13 @@ The popup now:
 
 - opens first when the user clicks the extension icon
 - is the primary user experience
-- keeps the current page context compact and concise
-- uses `Scan page` as the main action
-- streams the answer into the popup while the request is running
+- keeps the current screen context compact and concise
+- uses `Analyze Screen` as the main action
+- sends screenshot analysis to the backend
+- renders results as page bubbles through the content script
 - keeps settings and workspace links secondary
 
-`Scan page` sends `CANVY_START_ANALYSIS_RUN` to the MV3 background worker. That flow gathers page context, starts the backend request, streams progress into session state, and keeps the launcher window updated through storage changes.
+`Analyze Screen` sends `CAPTURE_VISIBLE_SCREEN` to the MV3 background worker. That flow captures the visible tab, starts the backend vision request, and sends the structured result to the content script for bubble rendering.
 
 `Open Workspace` remains available as a secondary action from the launcher window and opens the side panel explicitly when the user wants the larger workspace.
 
@@ -161,39 +189,34 @@ The launcher window and side panel both display this shortcut help directly in t
 - the active MV3 worker keeps `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })` in place so the action icon cannot hijack into the side panel
 - the launcher window opens the real workspace side panel directly with `chrome.sidePanel.open({ windowId })`, so workspace launch stays tied to an explicit launcher gesture instead of a follow-up worker message
 - the keyboard shortcut now opens the launcher window through the service worker
-- content scripts only extract page metadata and Canvas context when a page supports it
+- content scripts extract page metadata and render answer bubbles
 
 This means the assistant workspace is no longer hidden or broken just because a page-level sidebar injection failed.
 
 ## Side panel tabs
 
-The main workspace is now organized into five tabs:
+The main workspace is optional and organized around:
 
-- `Overview`: page summary, detected mode, readiness state, and quick actions
-- `Analyze`: real extracted page context, refresh/analyze buttons, and a structured analysis result
-- `Canvas`: Canvas-enhanced state, prompt preview, and assignment-aware context
-- `Workspace`: message thread, workflow cards, and backend-backed helper controls
-- `Settings`: debug toggle, motion toggle, backend connection status, shortcut help, and extension state details
+- current screen/page summary and readiness state
+- longer analysis history
+- study notes and follow-up chat
+- backend-backed helper controls
+- settings, diagnostics, motion, and backend connection status
 
-The side panel is now optional secondary workspace. The launcher window is the default surface.
+The side panel is a secondary workspace. The bubble overlay is the default answer surface.
 
-## How the Analyze tab works
+## How screen analysis works
 
-The Analyze tab is now wired end to end:
+The screen-analysis flow is wired end to end:
 
 1. the service worker resolves the active tab in the current window
-2. it asks the content script for:
-   - page title
-   - URL
-   - hostname
-   - headings
-   - a useful visible-text preview
-3. if the page is Canvas, it also extracts Canvas-specific context
-4. it runs a small rule-based analysis in `shared/analysis.ts`
-5. it stores the result in session state
-6. the side panel renders the extracted context and structured output
+2. it asks the content script for viewport dimensions
+3. it captures the visible tab screenshot
+4. it posts the image to `POST /api/screen/analyze`
+5. the backend returns strict JSON with detected questions, answers, confidence, and normalized bboxes
+6. the content script renders transparent answer bubbles near the detected regions
 
-That means popup scans and workspace analysis both update the UI with real data from the active tab instead of only mocked status copy.
+That means the primary result appears on the page, next to the screen content it explains.
 
 ## Setup
 
@@ -201,12 +224,29 @@ That means popup scans and workspace analysis both update the UI with real data 
 
    ```bash
    npm install
+   npm --prefix backend install
+   npm --prefix apps/companion install
    ```
 
-2. Build the extension:
+2. Confirm `backend/.env` has `AI_PROVIDER=kimi`, `KIMI_MODEL=kimi-k2.6`, and a backend-only `MOONSHOT_API_KEY`.
+
+3. Build the extension and backend:
 
    ```bash
-   npm run build
+   npm run build:extension
+   npm run build:backend
+   ```
+
+4. Start the desktop companion during development:
+
+   ```bash
+   npm run dev:companion
+   ```
+
+5. Run the local doctor when setup is unclear:
+
+   ```bash
+   npm run local:doctor
    ```
 
 ## API base URL resolution
@@ -215,11 +255,11 @@ Mako IQ resolves the backend origin in this order:
 
 1. a user-saved API base URL from extension settings
 2. `VITE_MAKOIQ_API_BASE_URL` or legacy `VITE_CANVY_API_BASE_URL` at build time
-3. the local fallback `http://localhost:8787`
+3. the local fallback `http://127.0.0.1:8787`
 
 If a built extension points at the wrong backend, open the extension options and update **API base URL**. The background worker now logs the resolved source and stores recent request diagnostics in extension session state.
 
-The central backend URL resolver lives in `src/canvy/shared/config.ts`. For GitHub to Render deployment, use `DEPLOY_RENDER.md`.
+The central backend URL resolver lives in `src/canvy/shared/config.ts`. For local setup, use `docs/LOCAL_FIRST_SETUP.md`. For optional GitHub to Render deployment, use `DEPLOY_RENDER.md`.
 
 The unpacked extension ID is now pinned through the `key` field in `public/manifest.json`, which keeps `chrome-extension://...` allowlists stable during development.
 
@@ -239,24 +279,15 @@ The unpacked extension ID is now pinned through the `key` field in `public/manif
 1. Open any normal website or article page
 2. Click the Mako IQ extension icon
 3. Confirm the popup opens
-4. Click `Scan page`
-5. Confirm extracted title, URL, visible text, and a streamed short answer appear
-6. Confirm the finished result stays concise and useful
-
-### Canvas page
-
-1. Open a Canvas course, assignment, or discussion page
-2. Click the Mako IQ extension icon
-3. Confirm the popup shows Canvas-aware context
-4. Click `Scan page`
-5. Confirm the popup returns a concise streamed answer
-6. Open `Workspace` only if you want the larger Canvas-aware surface
+4. Click `Analyze Screen`
+5. Confirm transparent answer bubbles appear near detected questions
+6. Expand, drag, copy, hide, and ask a follow-up from a bubble
 
 ### Keyboard shortcut
 
-1. Open a normal webpage or Canvas page
+1. Open a normal webpage
 2. Press `Ctrl+Shift+Y`
-3. Confirm the real Chrome side panel opens without using the popup
+3. Confirm Mako IQ opens from the launcher flow
 4. If it does not, assign your own shortcut in `chrome://extensions/shortcuts`
 
 ### Unsupported page

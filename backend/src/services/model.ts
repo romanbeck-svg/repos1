@@ -1,18 +1,89 @@
-import { env } from '../config/env.js';
+import { env, flags } from '../config/env.js';
+import { OllamaServiceError, ollamaChat } from '../ai/ollama.js';
 import { logger } from '../lib/logger.js';
 import type {
-  AnalysisCacheStatus,
-  AnalysisChart,
+  AnalysisAiTag,
+  AnalysisExtractionMode,
+  AnalysisQuestionCandidate,
+  AnalysisQuestionStatus,
   AnalysisResponseMeta,
-  AnalysisStreamEvent,
   AnalysisTimingMetrics,
+  AnalysisValidationSummary,
   AnalyzeRequestBody,
-  StructuredAnalysisOutput
+  StructuredAnalysisOutput,
+  StructuredQuestionAnswer,
+  AnalysisStreamEvent
 } from '../types/analysis.js';
 
-const MODEL_TIMEOUT_MS = 20_000;
+const MODEL_TIMEOUT_MS = env.aiRequestTimeoutMs;
 const MAX_PROVIDER_RETRIES = 1;
 const RETRY_DELAY_MS = 650;
+const ACCEPTABLE_FINISH_REASONS = new Set(['stop']);
+
+const QUESTION_ENGINE_PROMPT = `You are Mako IQ's page question extraction and answer engine.
+You are not a page summarizer.
+Your job is to read the supplied page content and return only structured question-answer results.
+
+Rules:
+
+Identify only real questions, prompts, or answerable tasks visible or strongly implied by the supplied page context.
+For each question, produce a direct answer.
+If answer choices are supplied, select the best visible choice and include the exact choice key/text in the answer.
+Under each answer, produce a short context block that helps the student understand why the answer fits.
+Keep each answer tied to the exact question id provided in the input.
+Use only the supplied page content and screenshot/context.
+If there are no real questions on the page, return ai_tag = "no_questions".
+If a question exists but cannot be answered confidently from the supplied context, mark it as answered = false and status = "insufficient_context".
+If the content appears to be a restricted or proctored assessment, do not provide direct answers; provide only study-safe concept support.
+Never summarize the whole page.
+Never repeat long passages from the page.
+Never echo the question as the answer.
+Never output prose outside the required JSON object.`;
+
+const QUESTION_SCHEMA = {
+  name: 'mako_page_question_answers',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ai_tag', 'extraction_mode', 'questions'],
+    properties: {
+      ai_tag: {
+        type: 'string',
+        enum: ['success', 'no_questions', 'insufficient_context', 'error']
+      },
+      extraction_mode: {
+        type: 'string',
+        enum: ['dom', 'vision', 'hybrid']
+      },
+      questions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'question', 'answer', 'context', 'answered', 'status', 'confidence', 'evidence', 'source_anchor'],
+          properties: {
+            id: { type: 'string' },
+            question: { type: 'string' },
+            answer: { type: 'string' },
+            context: { type: 'string' },
+            answered: { type: 'boolean' },
+            status: {
+              type: 'string',
+              enum: ['answered', 'insufficient_context']
+            },
+            confidence: { type: 'number' },
+            evidence: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            source_anchor: { type: 'string' }
+          }
+        }
+      }
+    }
+  }
+} as const;
 
 interface GenerateAnalysisResult {
   output: StructuredAnalysisOutput;
@@ -25,6 +96,13 @@ interface StreamAnalysisOptions {
   onEvent?: (event: AnalysisStreamEvent) => void;
 }
 
+interface ModelRoute {
+  provider: 'ollama' | 'kimi';
+  profile: AnalysisExtractionMode;
+  model: string;
+  maxTokens: number;
+}
+
 interface AttemptContext {
   request: AnalyzeRequestBody;
   requestId: string;
@@ -32,22 +110,26 @@ interface AttemptContext {
   route: ModelRoute;
 }
 
-interface StreamAttemptResult {
+interface AttemptResult {
   rawContent: string;
+  finishReason: string;
   timings: AnalysisTimingMetrics;
 }
 
-interface NonStreamAttemptResult {
-  rawContent: string;
-  timings: AnalysisTimingMetrics;
-}
-
-interface ModelRoute {
-  profile: 'quick' | 'reasoning' | 'vision';
-  model: string;
-  maxTokens: number;
-  includeThinkingControl: boolean;
-  thinkingMode: 'disabled' | 'enabled';
+interface ParsedModelOutput {
+  ai_tag: AnalysisAiTag;
+  extraction_mode: AnalysisExtractionMode;
+  questions: Array<{
+    id: string;
+    question: string;
+    answer: string;
+    context: string;
+    answered: boolean;
+    status: AnalysisQuestionStatus;
+    confidence: number;
+    evidence: string[];
+    source_anchor: string;
+  }>;
 }
 
 export class ModelServiceError extends Error {
@@ -82,270 +164,166 @@ function safeParseJson<T>(value: string) {
   return JSON.parse(extractFirstJsonObject(stripCodeFence(value))) as T;
 }
 
-function sanitizeString(value: unknown, fallback: string, maxLength = 420) {
+function cleanText(value: unknown, maxLength = 420) {
   if (typeof value !== 'string') {
-    return fallback;
+    return '';
   }
 
-  const cleaned = value.replace(/\s+/g, ' ').trim();
-  return cleaned.slice(0, maxLength) || fallback;
+  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
-function sanitizeStringArray(value: unknown, maxItems = 3, maxItemLength = 160) {
+function cleanStringArray(value: unknown, maxItems: number, maxItemLength: number) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .map((item) => sanitizeString(item, '', maxItemLength))
+    .map((item) => cleanText(item, maxItemLength))
     .filter(Boolean)
     .slice(0, maxItems);
 }
 
-function sanitizeChart(input: unknown): AnalysisChart | null {
-  if (!input || typeof input !== 'object') {
+function normalizeForCompare(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countWords(value: string) {
+  return normalizeForCompare(value).split(' ').filter(Boolean).length;
+}
+
+function tokenSet(value: string) {
+  return new Set(normalizeForCompare(value).split(' ').filter(Boolean));
+}
+
+function tokenJaccard(left: string, right: string) {
+  const leftSet = tokenSet(left);
+  const rightSet = tokenSet(right);
+  if (!leftSet.size || !rightSet.size) {
+    return 0;
+  }
+
+  let intersection = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) {
+      intersection += 1;
+    }
+  }
+
+  return intersection / (leftSet.size + rightSet.size - intersection);
+}
+
+function clampConfidence(value: number, min = 0, max = 1) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parseConfidenceScore(value: unknown) {
+  const rawText = typeof value === 'string' ? value.trim() : '';
+  const percentMatch = rawText.match(/^([0-9]+(?:\.[0-9]+)?)\s*%$/);
+  const parsed = percentMatch
+    ? Number(percentMatch[1]) / 100
+    : typeof value === 'string'
+      ? Number(rawText.replace(/,/g, ''))
+      : Number(value);
+
+  if (!Number.isFinite(parsed)) {
     return null;
   }
 
-  const chart = input as Partial<AnalysisChart>;
-  const type = chart.type;
-  if (type !== 'bar' && type !== 'line' && type !== 'pie' && type !== 'table') {
-    return null;
+  return clampConfidence(parsed > 1 ? parsed / 100 : parsed);
+}
+
+function answerMatchesCandidateChoice(answer: string, candidate?: AnalysisQuestionCandidate) {
+  if (!candidate?.answerChoices.length) {
+    return false;
   }
 
-  const labels = sanitizeStringArray(chart.labels, 12, 120);
-  const datasets = Array.isArray(chart.datasets)
-    ? chart.datasets
-        .map((dataset) => {
-          if (!dataset || typeof dataset !== 'object') {
-            return null;
-          }
-
-          const safeDataset = dataset as Partial<AnalysisChart['datasets'][number]>;
-          const data = Array.isArray(safeDataset.data)
-            ? safeDataset.data.map((value) => Number(value)).filter((value) => Number.isFinite(value)).slice(0, 12)
-            : [];
-
-          if (!data.length) {
-            return null;
-          }
-
-          return {
-            label: sanitizeString(safeDataset.label, 'Series', 120),
-            data
-          };
-        })
-        .filter((dataset): dataset is NonNullable<typeof dataset> => Boolean(dataset))
-        .slice(0, 4)
-    : [];
-
-  if (!labels.length || !datasets.length) {
-    return null;
+  const normalizedAnswer = normalizeForCompare(answer);
+  if (!normalizedAnswer) {
+    return false;
   }
 
-  return {
-    type,
-    title: sanitizeString(chart.title, 'Structured chart', 160),
-    labels,
-    datasets
-  };
+  return candidate.answerChoices.some((choice) => {
+    const normalizedChoice = normalizeForCompare(choice);
+    return normalizedChoice === normalizedAnswer || normalizedChoice.includes(normalizedAnswer) || normalizedAnswer.includes(normalizedChoice);
+  });
 }
 
-function selectModelRoute(request: AnalyzeRequestBody): ModelRoute {
-  if (request.screenshotBase64) {
-    return {
-      profile: 'vision',
-      model: env.moonshotVisionModel || env.moonshotModel,
-      maxTokens: request.mode === 'chart' ? 420 : 320,
-      includeThinkingControl: true,
-      thinkingMode: 'disabled'
-    };
+function estimateQuestionConfidence(input: {
+  rawConfidence: unknown;
+  answered: boolean;
+  status: AnalysisQuestionStatus;
+  answer: string;
+  context: string;
+  evidence: string[];
+  candidate?: AnalysisQuestionCandidate;
+}) {
+  const parsed = parseConfidenceScore(input.rawConfidence);
+  if (parsed !== null) {
+    return parsed;
   }
 
-  if (request.mode === 'chart') {
-    return {
-      profile: 'reasoning',
-      model: env.moonshotReasoningModel || env.moonshotModel,
-      maxTokens: 420,
-      includeThinkingControl: false,
-      thinkingMode: 'enabled'
-    };
+  if (!input.answered || input.status !== 'answered' || !input.answer) {
+    return 0.35;
   }
 
-  return {
-    profile: 'quick',
-    model: env.moonshotQuickModel || env.moonshotModel,
-    maxTokens: request.mode === 'quick_summary' ? 220 : request.mode === 'summary' ? 280 : request.mode === 'send_to_doc' ? 300 : 340,
-    includeThinkingControl: false,
-    thinkingMode: 'disabled'
-  };
-}
-
-function buildSystemPrompt(route: ModelRoute) {
-  return [
-    "You are Mako IQ's structured analysis engine.",
-    'Return valid JSON only.',
-    'Do not include markdown fences, preambles, or commentary outside the JSON object.',
-    'Keep the output concise by default.',
-    'Rules:',
-    '- `title`: a short answer line, ideally 2 to 6 words.',
-    '- `text`: 1 to 3 short sentences. Lead with the answer, not a preamble.',
-    '- `bullets`: at most 3 short bullets.',
-    '- `actions`: at most 1 concise next step.',
-    '- Avoid repeating the page title or the user instruction unless it adds value.',
-    route.profile === 'quick' ? '- Favor speed and directness over exhaustive detail.' : '- Stay concise even when deeper reasoning is needed.',
-    'Use this exact schema:',
-    '{',
-    '  "title": "string",',
-    '  "text": "string",',
-    '  "bullets": ["string"],',
-    '  "chart": null | {',
-    '    "type": "bar" | "line" | "pie" | "table",',
-    '    "title": "string",',
-    '    "labels": ["string"],',
-    '    "datasets": [{ "label": "string", "data": [number] }]',
-    '  },',
-    '  "actions": ["string"]',
-    '}'
-  ].join('\n');
-}
-
-function buildUserPrompt(request: AnalyzeRequestBody) {
-  const pageText = request.page.text || 'No readable page text was available. Mention that limitation briefly if it matters.';
-  const screenshotNote = request.screenshotBase64
-    ? 'A screenshot is attached. Use it only when it adds clear value.'
-    : 'No screenshot was included.';
-
-  return [
-    `MODE: ${request.mode}`,
-    `INSTRUCTION: ${request.instruction || 'None provided.'}`,
-    `PAGE TITLE: ${request.page.title}`,
-    `PAGE URL: ${request.page.url}`,
-    `SCREENSHOT: ${screenshotNote}`,
-    'PAGE TEXT:',
-    pageText,
-    '',
-    'Mode guidance:',
-    '- answer: direct explanation first, then up to 3 bullets if needed.',
-    '- summary: condensed answer plus up to 3 bullets.',
-    '- quick_summary: very short answer, bullet-heavy if useful.',
-    '- chart: include a chart only when the page contains clear structured data; otherwise explain why briefly.',
-    '- send_to_doc: concise structured summary suitable for saving elsewhere.'
-  ].join('\n');
-}
-
-function createMoonshotRequestBody(request: AnalyzeRequestBody, route: ModelRoute, stream: boolean) {
-  const content =
-    request.screenshotBase64 && route.profile === 'vision'
-      ? [
-          {
-            type: 'text',
-            text: buildUserPrompt(request)
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:image/png;base64,${request.screenshotBase64}`
-            }
-          }
-        ]
-      : buildUserPrompt(request);
-
-  const body: Record<string, unknown> = {
-    model: route.model,
-    messages: [
-      {
-        role: 'system',
-        content: buildSystemPrompt(route)
-      },
-      {
-        role: 'user',
-        content
-      }
-    ],
-    max_tokens: route.maxTokens,
-    response_format: {
-      type: 'json_object'
-    },
-    stream
-  };
-
-  if (route.includeThinkingControl) {
-    body.thinking = {
-      type: route.thinkingMode
-    };
+  let estimated = input.candidate?.answerChoices.length ? 0.64 : 0.62;
+  if (answerMatchesCandidateChoice(input.answer, input.candidate)) {
+    estimated = 0.76;
   }
 
-  return body;
-}
-
-function readCompletionText(payload: any) {
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') {
-    return content;
+  if (input.context) {
+    estimated += 0.05;
   }
 
-  if (Array.isArray(content)) {
-    return content
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        }
-
-        if (item && typeof item === 'object' && typeof item.text === 'string') {
-          return item.text;
-        }
-
-        return '';
-      })
-      .join('\n')
-      .trim();
+  if (input.evidence.length) {
+    estimated += 0.04;
   }
 
-  return '';
-}
-
-function normalizeOutput(parsed: unknown, request: AnalyzeRequestBody): StructuredAnalysisOutput {
-  const source = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  const chart = sanitizeChart(source.chart);
-  const bulletLimit = request.mode === 'quick_summary' ? 3 : 3;
-  const bullets = sanitizeStringArray(source.bullets, bulletLimit, 140);
-  const actions = sanitizeStringArray(source.actions, 1, 140);
-  const fallbackText =
-    chart && request.mode === 'chart'
-      ? `Chart ready: ${chart.title}.`
-      : request.mode === 'quick_summary'
-        ? 'No concise answer was returned.'
-        : 'The model returned an incomplete analysis response.';
-
-  return {
-    title: sanitizeString(source.title, request.page.title || 'Quick scan', 90),
-    text: sanitizeString(
-      source.text,
-      fallbackText,
-      request.mode === 'quick_summary' ? 220 : request.mode === 'summary' ? 320 : 480
-    ),
-    bullets,
-    chart,
-    actions
-  };
-}
-
-function shouldRetryStatus(status: number) {
-  return status === 408 || status === 429 || status >= 500;
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function maybeAbort(signal?: AbortSignal) {
-  if (signal?.aborted) {
-    throw new ModelServiceError('Moonshot request was cancelled.', {
-      status: 499,
-      exposeMessage: 'The analysis request was cancelled.'
-    });
+  if (countWords(input.answer) >= 3) {
+    estimated += 0.03;
   }
+
+  return clampConfidence(estimated, 0.45, 0.86);
+}
+
+function isQuestionEcho(question: string, answer: string) {
+  const normalizedQuestion = normalizeForCompare(question);
+  const normalizedAnswer = normalizeForCompare(answer);
+
+  if (!normalizedQuestion || !normalizedAnswer) {
+    return false;
+  }
+
+  if (normalizedQuestion === normalizedAnswer) {
+    return true;
+  }
+
+  if (normalizedAnswer.length >= 24 && (normalizedAnswer.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedAnswer))) {
+    return true;
+  }
+
+  return countWords(question) >= 4 && tokenJaccard(question, answer) >= 0.9;
+}
+
+function isSourceParrot(answer: string, sourceText: string, sourceBlocks: string[]) {
+  if (answer.length < 90) {
+    return false;
+  }
+
+  const normalizedAnswer = normalizeForCompare(answer);
+  if (!normalizedAnswer) {
+    return false;
+  }
+
+  if (normalizeForCompare(sourceText).includes(normalizedAnswer)) {
+    return true;
+  }
+
+  return sourceBlocks.some((block) => normalizeForCompare(block).includes(normalizedAnswer));
 }
 
 function createAttemptTimings(retryCount: number): AnalysisTimingMetrics {
@@ -358,10 +336,22 @@ function createAttemptTimings(retryCount: number): AnalysisTimingMetrics {
   };
 }
 
+function maybeAbort(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new ModelServiceError('Moonshot request was cancelled.', {
+      status: 499,
+      exposeMessage: 'The analysis request was cancelled.'
+    });
+  }
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function withTimeout(signal?: AbortSignal) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
-
   const handleAbort = () => controller.abort();
   signal?.addEventListener('abort', handleAbort);
 
@@ -374,33 +364,209 @@ function withTimeout(signal?: AbortSignal) {
   };
 }
 
-function buildMeta(requestId: string, cacheStatus: AnalysisCacheStatus, timings: AnalysisTimingMetrics): AnalysisResponseMeta {
+function shouldRetryStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function selectModelRoute(request: AnalyzeRequestBody): ModelRoute {
+  if (env.aiProvider === 'ollama') {
+    const profile: AnalysisExtractionMode = request.screenshotBase64 && request.page.text.length < 180
+      ? 'vision'
+      : request.screenshotBase64
+        ? 'hybrid'
+        : 'dom';
+    const model = request.screenshotBase64 && env.ollamaVisionModel ? env.ollamaVisionModel : env.ollamaModel;
+
+    return {
+      provider: 'ollama',
+      profile,
+      model,
+      maxTokens: profile === 'dom' ? 1_200 : 1_400
+    };
+  }
+
+  if (request.screenshotBase64 && request.page.text.length < 180) {
+    return {
+      provider: 'kimi',
+      profile: 'vision',
+      model: env.kimiModel,
+      maxTokens: 1_200
+    };
+  }
+
+  if (request.screenshotBase64) {
+    return {
+      provider: 'kimi',
+      profile: 'hybrid',
+      model: env.kimiModel,
+      maxTokens: 1_400
+    };
+  }
+
   return {
-    requestId,
-    cacheStatus,
-    timings: {
-      ...timings,
-      updatedAt: new Date().toISOString()
-    }
+    provider: 'kimi',
+    profile: 'dom',
+    model: env.moonshotQuickModel || env.kimiModel,
+    maxTokens: request.page.questionCandidates.length ? 700 : 1_200
   };
 }
 
-function finalizeMeta(meta: AnalysisResponseMeta, normalizationMs: number, completedAt: string): AnalysisResponseMeta {
-  const baseTimings = meta.timings;
-
-  return {
-    ...meta,
-    timings: {
-      startedAt: baseTimings?.startedAt ?? completedAt,
-      ...baseTimings,
-      normalizationMs,
-      completedAt,
-      updatedAt: completedAt
-    }
-  };
+function buildUserPayload(request: AnalyzeRequestBody, route: ModelRoute) {
+  return JSON.stringify(
+    {
+      instruction: cleanText(request.instruction, 400) || null,
+      expected_output: {
+        ai_tag: ['success', 'no_questions', 'insufficient_context', 'error'],
+        extraction_mode: route.profile,
+        question_count_hint: request.page.questionCandidates.length
+      },
+      page: {
+        url: request.page.url,
+        title: request.page.title,
+        headings: request.page.headings,
+        blocks: request.page.blocks,
+        question_candidates: request.page.questionCandidates.map((candidate) => ({
+          id: candidate.id,
+          question: candidate.question,
+          section_label: candidate.sectionLabel ?? '',
+          nearby_text: candidate.nearbyText,
+          answer_choices: candidate.answerChoices,
+          source_anchor: candidate.sourceAnchor,
+          selector_hint: candidate.selectorHint ?? ''
+        })),
+        text_excerpt: request.page.text,
+        extraction_notes: request.page.extractionNotes ?? []
+      },
+      screenshot_attached: Boolean(request.screenshotBase64)
+    },
+    null,
+    2
+  );
 }
 
-async function runNonStreamingAttempt(context: AttemptContext, retryCount: number): Promise<NonStreamAttemptResult> {
+function buildMoonshotRequestBody(request: AnalyzeRequestBody, route: ModelRoute, stream: boolean, useJsonSchema: boolean) {
+  const userContent =
+    request.screenshotBase64 && (route.profile === 'vision' || route.profile === 'hybrid')
+      ? [
+          {
+            type: 'text',
+            text: buildUserPayload(request, route)
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:image/png;base64,${request.screenshotBase64}`
+            }
+          }
+        ]
+      : [
+          {
+            type: 'text',
+            text: buildUserPayload(request, route)
+          }
+        ];
+
+  const body: Record<string, unknown> = {
+    model: route.model,
+    messages: [
+      {
+        role: 'system',
+        content: QUESTION_ENGINE_PROMPT
+      },
+      {
+        role: 'user',
+        content: userContent
+      }
+    ],
+    max_tokens: route.maxTokens,
+    thinking: {
+      type: 'disabled'
+    },
+    stream
+  };
+
+  body.response_format = useJsonSchema
+    ? {
+        type: 'json_schema',
+        json_schema: QUESTION_SCHEMA
+      }
+    : {
+        type: 'json_object'
+      };
+
+  return body;
+}
+
+function buildOllamaMessages(request: AnalyzeRequestBody, route: ModelRoute) {
+  const userMessage: {
+    role: 'user';
+    content: string;
+    images?: string[];
+  } = {
+    role: 'user',
+    content: buildUserPayload(request, route)
+  };
+
+  if (request.screenshotBase64 && env.ollamaVisionModel && route.model === env.ollamaVisionModel) {
+    userMessage.images = [request.screenshotBase64];
+  }
+
+  return [
+    {
+      role: 'system' as const,
+      content: QUESTION_ENGINE_PROMPT
+    },
+    userMessage
+  ];
+}
+
+function extractProviderMessageContent(content: unknown) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+
+      if (part && typeof part === 'object' && typeof (part as { text?: string }).text === 'string') {
+        return (part as { text: string }).text;
+      }
+
+      return '';
+    })
+    .join('\n')
+    .trim();
+}
+
+function extractCompletionText(payload: any) {
+  const messageContent = payload?.choices?.[0]?.message?.content;
+  return extractProviderMessageContent(messageContent);
+}
+
+function shouldFallbackToJsonObject(status: number, responseText: string) {
+  return status === 400 && /json_schema|response_format|schema/i.test(responseText);
+}
+
+function getKimiExposeMessage(status: number) {
+  if (status === 401 || status === 403) {
+    return 'Kimi rejected the API key. Check MOONSHOT_API_KEY in backend/.env.';
+  }
+
+  return 'Kimi API request failed. Check internet connection, API key, billing, or model name.';
+}
+
+async function runNonStreamingAttemptWithFormat(
+  context: AttemptContext,
+  retryCount: number,
+  useJsonSchema: boolean
+): Promise<AttemptResult> {
   maybeAbort(context.signal);
   const timings = createAttemptTimings(retryCount);
   const startedAt = Date.now();
@@ -411,20 +577,21 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
       {
         requestId: context.requestId,
         mode: context.request.mode,
-        profile: context.route.profile,
+        extractionMode: context.route.profile,
         model: context.route.model,
-        maxTokens: context.route.maxTokens
+        maxTokens: context.route.maxTokens,
+        schemaMode: useJsonSchema ? 'json_schema' : 'json_object'
       },
-      'sending non-stream moonshot request'
+      'sending non-stream moonshot QA request'
     );
 
-    const response = await fetch(`${env.moonshotBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await fetch(`${env.kimiBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${env.moonshotApiKey}`
       },
-      body: JSON.stringify(createMoonshotRequestBody(context.request, context.route, false)),
+      body: JSON.stringify(buildMoonshotRequestBody(context.request, context.route, false, useJsonSchema)),
       signal: timeout.signal
     });
 
@@ -442,25 +609,31 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
     }
 
     if (!response.ok) {
+      if (useJsonSchema && shouldFallbackToJsonObject(response.status, responseText)) {
+        return runNonStreamingAttemptWithFormat(context, retryCount, false);
+      }
+
       logger.error(
         {
           requestId: context.requestId,
           status: response.status,
           mode: context.request.mode,
+          extractionMode: context.route.profile,
           model: context.route.model,
           providerError: parsedResponse?.error?.message ?? responseText.slice(0, 500)
         },
-        'moonshot request failed'
+        'moonshot QA request failed'
       );
 
-      throw new ModelServiceError(`Moonshot request failed with status ${response.status}.`, {
+      throw new ModelServiceError(`Kimi request failed with status ${response.status}.`, {
         status: response.status >= 500 ? 502 : 500,
-        exposeMessage: 'Kimi could not complete the scan right now.',
+        exposeMessage: getKimiExposeMessage(response.status),
         retryable: shouldRetryStatus(response.status)
       });
     }
 
-    const content = readCompletionText(parsedResponse);
+    const content = extractCompletionText(parsedResponse);
+    const finishReason = cleanText(parsedResponse?.choices?.[0]?.finish_reason, 40) || 'unknown';
     if (!content) {
       throw new ModelServiceError('Moonshot returned an empty completion.', {
         status: 502,
@@ -475,6 +648,7 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
 
     return {
       rawContent: content,
+      finishReason,
       timings
     };
   } catch (error) {
@@ -492,8 +666,7 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
 
       throw new ModelServiceError('Moonshot request timed out.', {
         status: 504,
-        exposeMessage: 'Kimi took too long to respond. Try again in a moment.',
-        retryable: false
+        exposeMessage: 'Kimi took too long to respond. Try again in a moment.'
       });
     }
 
@@ -501,14 +674,16 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
       {
         requestId: context.requestId,
         mode: context.request.mode,
+        extractionMode: context.route.profile,
         model: context.route.model,
         detail: error instanceof Error ? error.message : 'Unknown model error'
       },
-      'structured analysis request failed before completion'
+      'structured QA request failed before completion'
     );
-    throw new ModelServiceError('Structured analysis failed.', {
+
+    throw new ModelServiceError('Kimi structured analysis failed.', {
       status: 502,
-      exposeMessage: 'The AI scan failed before a response was returned.',
+      exposeMessage: 'Kimi API request failed. Check internet connection, API key, billing, or model name.',
       retryable: true
     });
   } finally {
@@ -516,11 +691,111 @@ async function runNonStreamingAttempt(context: AttemptContext, retryCount: numbe
   }
 }
 
-async function runStreamingAttempt(
+async function runNonStreamingOllamaAttempt(context: AttemptContext, retryCount: number): Promise<AttemptResult> {
+  maybeAbort(context.signal);
+  const timings = createAttemptTimings(retryCount);
+  const startedAt = Date.now();
+  const timeout = withTimeout(context.signal);
+
+  try {
+    logger.info(
+      {
+        requestId: context.requestId,
+        mode: context.request.mode,
+        extractionMode: context.route.profile,
+        model: context.route.model,
+        maxTokens: context.route.maxTokens,
+        hasScreenshot: Boolean(context.request.screenshotBase64)
+      },
+      'sending non-stream ollama QA request'
+    );
+
+    if (context.request.screenshotBase64 && context.route.profile === 'vision' && !env.ollamaVisionModel) {
+      throw new ModelServiceError('No Ollama vision model is configured for screenshot-only analysis.', {
+        status: 501,
+        exposeMessage: 'Screenshot analysis needs a local vision model. Configure OLLAMA_VISION_MODEL in Mako IQ Companion.'
+      });
+    }
+
+    const response = await ollamaChat({
+      model: context.route.model,
+      messages: buildOllamaMessages(context.request, context.route),
+      format: 'json',
+      keepAlive: env.ollamaKeepAlive,
+      options: {
+        temperature: 0,
+        num_predict: context.route.maxTokens
+      },
+      signal: timeout.signal,
+      timeoutMs: MODEL_TIMEOUT_MS
+    });
+
+    const backendMs = Date.now() - startedAt;
+    timings.backendMs = backendMs;
+    timings.modelMs = Math.round((response.totalDuration ?? backendMs * 1_000_000) / 1_000_000);
+    timings.totalMs = backendMs;
+    timings.updatedAt = new Date().toISOString();
+
+    return {
+      rawContent: response.content,
+      finishReason: response.doneReason || 'stop',
+      timings
+    };
+  } catch (error) {
+    if (error instanceof ModelServiceError) {
+      throw error;
+    }
+
+    if (error instanceof OllamaServiceError) {
+      throw new ModelServiceError(error.message, {
+        status: error.status,
+        exposeMessage: error.exposeMessage,
+        retryable: error.retryable
+      });
+    }
+
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      if (context.signal?.aborted) {
+        throw new ModelServiceError('Ollama request was cancelled.', {
+          status: 499,
+          exposeMessage: 'The analysis request was cancelled.'
+        });
+      }
+
+      throw new ModelServiceError('Ollama request timed out.', {
+        status: 504,
+        exposeMessage: 'Local AI model took too long to respond. Check Mako IQ Companion and try again.',
+        retryable: true
+      });
+    }
+
+    logger.error(
+      {
+        requestId: context.requestId,
+        mode: context.request.mode,
+        extractionMode: context.route.profile,
+        model: context.route.model,
+        detail: error instanceof Error ? error.message : 'Unknown local model error'
+      },
+      'ollama structured QA request failed before completion'
+    );
+
+    throw new ModelServiceError('Ollama structured analysis failed.', {
+      status: 502,
+      exposeMessage: 'Local AI could not complete the scan.',
+      retryable: true
+    });
+  } finally {
+    timeout.dispose();
+  }
+}
+
+async function runStreamingAttemptWithFormat(
   context: AttemptContext,
   retryCount: number,
-  onEvent?: (event: AnalysisStreamEvent) => void
-): Promise<StreamAttemptResult> {
+  onEvent: ((event: AnalysisStreamEvent) => void) | undefined,
+  useJsonSchema: boolean
+): Promise<AttemptResult> {
   maybeAbort(context.signal);
   const timings = createAttemptTimings(retryCount);
   const requestStartedAt = Date.now();
@@ -532,39 +807,45 @@ async function runStreamingAttempt(
       {
         requestId: context.requestId,
         mode: context.request.mode,
-        profile: context.route.profile,
+        extractionMode: context.route.profile,
         model: context.route.model,
-        maxTokens: context.route.maxTokens
+        maxTokens: context.route.maxTokens,
+        schemaMode: useJsonSchema ? 'json_schema' : 'json_object'
       },
-      'sending streaming moonshot request'
+      'sending streaming moonshot QA request'
     );
 
-    const response = await fetch(`${env.moonshotBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await fetch(`${env.kimiBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${env.moonshotApiKey}`
       },
-      body: JSON.stringify(createMoonshotRequestBody(context.request, context.route, true)),
+      body: JSON.stringify(buildMoonshotRequestBody(context.request, context.route, true, useJsonSchema)),
       signal: timeout.signal
     });
 
     if (!response.ok) {
       const responseText = await response.text();
+      if (useJsonSchema && shouldFallbackToJsonObject(response.status, responseText)) {
+        return runStreamingAttemptWithFormat(context, retryCount, onEvent, false);
+      }
+
       logger.error(
         {
           requestId: context.requestId,
           status: response.status,
           mode: context.request.mode,
+          extractionMode: context.route.profile,
           model: context.route.model,
           providerError: responseText.slice(0, 500)
         },
-        'moonshot streaming request failed'
+        'moonshot streaming QA request failed'
       );
 
-      throw new ModelServiceError(`Moonshot request failed with status ${response.status}.`, {
+      throw new ModelServiceError(`Kimi request failed with status ${response.status}.`, {
         status: shouldRetryStatus(response.status) ? 502 : 500,
-        exposeMessage: 'Kimi could not complete the scan right now.',
+        exposeMessage: getKimiExposeMessage(response.status),
         retryable: shouldRetryStatus(response.status)
       });
     }
@@ -580,7 +861,7 @@ async function runStreamingAttempt(
       type: 'status',
       requestId: context.requestId,
       phase: 'requesting_backend',
-      message: 'Kimi is preparing a fast scan...',
+      message: 'Kimi is preparing question extraction...',
       timings: {
         backendMs: Date.now() - requestStartedAt
       }
@@ -590,6 +871,7 @@ async function runStreamingAttempt(
     const reader = response.body.getReader();
     let rawBuffer = '';
     let lineBuffer = '';
+    let finishReason = 'unknown';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -619,7 +901,12 @@ async function runStreamingAttempt(
 
         const chunk = JSON.parse(payload) as any;
         for (const choice of chunk.choices ?? []) {
-          const deltaContent = typeof choice?.delta?.content === 'string' ? choice.delta.content : '';
+          const deltaContent = extractProviderMessageContent(choice?.delta?.content);
+          const nextFinishReason = cleanText(choice?.finish_reason, 40);
+          if (nextFinishReason) {
+            finishReason = nextFinishReason;
+          }
+
           if (!deltaContent) {
             continue;
           }
@@ -633,19 +920,12 @@ async function runStreamingAttempt(
               type: 'status',
               requestId: context.requestId,
               phase: 'streaming',
-              message: 'Kimi is streaming the answer...',
+              message: 'Kimi is validating question-answer output...',
               timings: {
                 firstChunkMs: timings.firstChunkMs
               }
             });
           }
-
-          onEvent?.({
-            type: 'delta',
-            requestId: context.requestId,
-            chunk: deltaContent,
-            accumulatedText: rawBuffer
-          });
         }
       }
     }
@@ -667,6 +947,7 @@ async function runStreamingAttempt(
 
     return {
       rawContent: rawBuffer,
+      finishReason,
       timings
     };
   } catch (error) {
@@ -692,15 +973,17 @@ async function runStreamingAttempt(
       {
         requestId: context.requestId,
         mode: context.request.mode,
+        extractionMode: context.route.profile,
         model: context.route.model,
         detail: error instanceof Error ? error.message : 'Unknown streaming error',
         receivedContent
       },
-      'structured analysis streaming request failed'
+      'structured QA streaming request failed'
     );
-    throw new ModelServiceError('Structured analysis failed.', {
+
+    throw new ModelServiceError('Kimi structured analysis failed.', {
       status: 502,
-      exposeMessage: 'The AI scan failed before a response was returned.',
+      exposeMessage: 'Kimi API request failed. Check internet connection, API key, billing, or model name.',
       retryable: !receivedContent
     });
   } finally {
@@ -708,12 +991,164 @@ async function runStreamingAttempt(
   }
 }
 
-function parseStructuredOutput(rawContent: string, request: AnalyzeRequestBody, requestId: string, timings: AnalysisTimingMetrics) {
+function validateParsedOutput(
+  parsed: unknown,
+  request: AnalyzeRequestBody,
+  finishReason: string
+): { output: StructuredAnalysisOutput; normalizationMs: number } {
   const startedAt = Date.now();
-  let parsedOutput: unknown;
+  const candidateMap = new Map(request.page.questionCandidates.map((candidate) => [candidate.id, candidate]));
+  const sourceBlocks = request.page.blocks.length ? request.page.blocks : request.page.text.split(/\n{2,}/).filter(Boolean);
+  const raw = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  const aiTag = cleanText(raw.ai_tag, 60) as AnalysisAiTag;
+  const extractionMode = cleanText(raw.extraction_mode, 20) as AnalysisExtractionMode;
+  const candidateQuestionCount = request.page.questionCandidates.length;
+  let parseSuccess = true;
+  let schemaValid = true;
+  let echoGuardHit = false;
+  let resultState: StructuredAnalysisOutput['resultState'] = 'invalid_ai_output';
+
+  const normalizedQuestions: StructuredQuestionAnswer[] = [];
+
+  if (!['success', 'no_questions', 'insufficient_context', 'error'].includes(aiTag)) {
+    schemaValid = false;
+  }
+
+  if (!['dom', 'vision', 'hybrid'].includes(extractionMode)) {
+    schemaValid = false;
+  }
+
+  if (!Array.isArray(raw.questions)) {
+    schemaValid = false;
+  } else {
+    for (const rawQuestion of raw.questions) {
+      if (!rawQuestion || typeof rawQuestion !== 'object') {
+        schemaValid = false;
+        continue;
+      }
+
+      const questionRecord = rawQuestion as Record<string, unknown>;
+      const id = cleanText(questionRecord.id, 80);
+      const candidate = candidateMap.get(id);
+
+      if (!id || !candidate) {
+        schemaValid = false;
+        continue;
+      }
+
+      const answered = Boolean(questionRecord.answered);
+      const status = cleanText(questionRecord.status, 40) === 'answered' ? 'answered' : 'insufficient_context';
+      const answer = cleanText(questionRecord.answer, 320);
+      const question = cleanText(questionRecord.question, 320) || candidate.question;
+      const context = cleanText(questionRecord.context, 240);
+      const evidence = cleanStringArray(questionRecord.evidence, 4, 180);
+      const confidence = estimateQuestionConfidence({
+        rawConfidence: questionRecord.confidence,
+        answered,
+        status,
+        answer,
+        context,
+        evidence,
+        candidate
+      });
+      const normalized = {
+        id,
+        question,
+        answer,
+        context,
+        answered,
+        status,
+        confidence,
+        evidence,
+        source_anchor: candidate.sourceAnchor
+      } satisfies StructuredQuestionAnswer;
+
+      if (!normalized.question || (!normalized.answer && normalized.answered)) {
+        schemaValid = false;
+        continue;
+      }
+
+      if (normalized.answered && (isQuestionEcho(normalized.question, normalized.answer) || isSourceParrot(normalized.answer, request.page.text, sourceBlocks))) {
+        echoGuardHit = true;
+      }
+
+      if (
+        normalized.answered &&
+        !normalized.context &&
+        isSourceParrot(normalized.answer, request.page.text, sourceBlocks)
+      ) {
+        echoGuardHit = true;
+      }
+
+      normalizedQuestions.push(normalized);
+    }
+  }
+
+  const answeredQuestionCount = normalizedQuestions.filter((question) => question.answered).length;
+  const acceptableFinishReason = ACCEPTABLE_FINISH_REASONS.has(finishReason);
+
+  if (!acceptableFinishReason) {
+    schemaValid = false;
+  }
+
+  if (aiTag === 'success' && schemaValid && answeredQuestionCount > 0 && normalizedQuestions.length > 0 && !echoGuardHit) {
+    resultState = 'success';
+  } else if (aiTag === 'no_questions' && schemaValid) {
+    resultState = 'no_questions';
+  } else if (aiTag === 'insufficient_context' && schemaValid) {
+    resultState = 'insufficient_context';
+  } else {
+    resultState = 'invalid_ai_output';
+  }
+
+  const aiTaggedSuccessfully =
+    resultState === 'success' &&
+    acceptableFinishReason &&
+    parseSuccess &&
+    schemaValid &&
+    aiTag === 'success' &&
+    normalizedQuestions.length > 0 &&
+    answeredQuestionCount > 0 &&
+    !echoGuardHit;
+
+  const message =
+    resultState === 'success'
+      ? `Validated ${answeredQuestionCount} question${answeredQuestionCount === 1 ? '' : 's'} from the page.`
+      : resultState === 'no_questions'
+        ? 'No real questions were detected on this page.'
+        : resultState === 'insufficient_context'
+          ? 'Questions were detected, but the visible context was not sufficient to answer them confidently.'
+          : 'AI output was suppressed because it did not pass validation.';
+
+  const validation: AnalysisValidationSummary = {
+    modelCallSucceeded: true,
+    finishReason,
+    parseSuccess,
+    schemaValid,
+    echoGuardHit,
+    candidateQuestionCount,
+    answeredQuestionCount
+  };
+
+  return {
+    output: {
+      resultState,
+      ai_tag: resultState === 'invalid_ai_output' ? 'error' : aiTag,
+      extraction_mode: extractionMode || (request.screenshotBase64 ? 'hybrid' : 'dom'),
+      questions: normalizedQuestions,
+      aiTaggedSuccessfully,
+      validation,
+      message
+    },
+    normalizationMs: Date.now() - startedAt
+  };
+}
+
+function parseStructuredOutput(rawContent: string, request: AnalyzeRequestBody, requestId: string, finishReason: string) {
+  let parsedOutput: ParsedModelOutput;
 
   try {
-    parsedOutput = safeParseJson(rawContent);
+    parsedOutput = safeParseJson<ParsedModelOutput>(rawContent);
   } catch (error) {
     logger.warn(
       {
@@ -722,94 +1157,178 @@ function parseStructuredOutput(rawContent: string, request: AnalyzeRequestBody, 
         detail: error instanceof Error ? error.message : 'Unknown parse failure',
         contentPreview: rawContent.slice(0, 500)
       },
-      'moonshot completion could not be parsed as JSON'
+      'moonshot QA completion could not be parsed as JSON'
     );
-    throw new ModelServiceError('Moonshot completion was not valid JSON.', {
-      status: 502,
-      exposeMessage: 'Kimi returned malformed JSON. Try the scan again.'
-    });
+
+    const validation: AnalysisValidationSummary = {
+      modelCallSucceeded: true,
+      finishReason,
+      parseSuccess: false,
+      schemaValid: false,
+      echoGuardHit: false,
+      candidateQuestionCount: request.page.questionCandidates.length,
+      answeredQuestionCount: 0
+    };
+    const extractionMode: AnalysisExtractionMode = request.screenshotBase64 ? 'hybrid' : 'dom';
+
+    return {
+      output: {
+        resultState: 'invalid_ai_output' as const,
+        ai_tag: 'error' as const,
+        extraction_mode: extractionMode,
+        questions: [],
+        aiTaggedSuccessfully: false,
+        validation,
+        message: 'AI output was suppressed because the model did not return valid JSON.'
+      },
+      normalizationMs: 0
+    };
   }
 
-  const output = normalizeOutput(parsedOutput, request);
-  const normalizationMs = Date.now() - startedAt;
+  const result = validateParsedOutput(parsedOutput, request, finishReason);
+  logger.info(
+    {
+      requestId,
+      mode: request.mode,
+      extractionMode: result.output.extraction_mode,
+      aiTag: result.output.ai_tag,
+      resultState: result.output.resultState,
+      candidateQuestionCount: result.output.validation.candidateQuestionCount,
+      answeredQuestionCount: result.output.validation.answeredQuestionCount,
+      parseSuccess: result.output.validation.parseSuccess,
+      schemaValid: result.output.validation.schemaValid,
+      echoGuardHit: result.output.validation.echoGuardHit,
+      aiTaggedSuccessfully: result.output.aiTaggedSuccessfully
+    },
+    'structured QA output validated'
+  );
+  return result;
+}
+
+function buildMeta(requestId: string, cacheStatus: 'miss', timings: AnalysisTimingMetrics): AnalysisResponseMeta {
+  return {
+    requestId,
+    cacheStatus,
+    timings
+  };
+}
+
+function finalizeMeta(meta: AnalysisResponseMeta, normalizationMs: number, completedAt: string): AnalysisResponseMeta {
+  const baseTimings = meta.timings;
 
   return {
-    output,
-    meta: buildMeta(requestId, 'miss', {
-      ...timings,
-      totalMs: timings.totalMs ?? normalizationMs,
-      updatedAt: new Date().toISOString()
-    }),
-    normalizationMs
+    ...meta,
+    timings: {
+      startedAt: baseTimings?.startedAt ?? completedAt,
+      ...baseTimings,
+      normalizationMs,
+      completedAt,
+      updatedAt: completedAt
+    }
   };
 }
 
 export async function generateStructuredAnalysis(request: AnalyzeRequestBody, requestId: string = crypto.randomUUID()): Promise<GenerateAnalysisResult> {
-  if (!env.moonshotApiKey) {
+  const route = selectModelRoute(request);
+  if (route.provider === 'kimi' && !flags.moonshotConfigured) {
     throw new ModelServiceError('Missing MOONSHOT_API_KEY.', {
       status: 500,
-      exposeMessage: 'The backend is missing MOONSHOT_API_KEY, so live analysis is unavailable.'
+      exposeMessage: 'Kimi API key is missing in the local backend. Add MOONSHOT_API_KEY to backend/.env or configure it in Mako IQ Companion.'
     });
   }
 
-  const route = selectModelRoute(request);
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt += 1) {
     try {
-      const attemptResult = await runNonStreamingAttempt({ request, requestId, route }, attempt);
-      const normalized = parseStructuredOutput(attemptResult.rawContent, request, requestId, attemptResult.timings);
+      const attemptResult =
+        route.provider === 'ollama'
+          ? await runNonStreamingOllamaAttempt({ request, requestId, route }, attempt)
+          : await runNonStreamingAttemptWithFormat({ request, requestId, route }, attempt, true);
+      const { output, normalizationMs } = parseStructuredOutput(
+        attemptResult.rawContent,
+        request,
+        requestId,
+        attemptResult.finishReason
+      );
       const completedAt = new Date().toISOString();
+      const meta = finalizeMeta(buildMeta(requestId, 'miss', attemptResult.timings), normalizationMs, completedAt);
 
       return {
-        output: normalized.output,
-        meta: finalizeMeta(normalized.meta, normalized.normalizationMs, completedAt)
+        output,
+        meta
       };
     } catch (error) {
       lastError = error;
-
-      if (!(error instanceof ModelServiceError) || !error.retryable || error.status === 499 || attempt >= MAX_PROVIDER_RETRIES) {
-        throw error;
+      const retryable = error instanceof ModelServiceError ? error.retryable : false;
+      if (attempt < MAX_PROVIDER_RETRIES && retryable) {
+        await wait(RETRY_DELAY_MS);
+        continue;
       }
-
-      logger.warn(
-        {
-          requestId,
-          mode: request.mode,
-          model: route.model,
-          attempt,
-          detail: error.message
-        },
-        'retrying moonshot request after transient failure'
-      );
-      await wait(RETRY_DELAY_MS * (attempt + 1));
+      throw error;
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Analysis failed.');
+  throw lastError instanceof Error ? lastError : new ModelServiceError('Structured analysis failed unexpectedly.');
 }
 
-export async function streamStructuredAnalysis(request: AnalyzeRequestBody, options: StreamAnalysisOptions): Promise<GenerateAnalysisResult> {
-  if (!env.moonshotApiKey) {
+export async function streamStructuredAnalysis(request: AnalyzeRequestBody, options: StreamAnalysisOptions): Promise<void> {
+  const route = selectModelRoute(request);
+  if (route.provider === 'kimi' && !flags.moonshotConfigured) {
     throw new ModelServiceError('Missing MOONSHOT_API_KEY.', {
       status: 500,
-      exposeMessage: 'The backend is missing MOONSHOT_API_KEY, so live analysis is unavailable.'
+      exposeMessage: 'Kimi API key is missing in the local backend. Add MOONSHOT_API_KEY to backend/.env or configure it in Mako IQ Companion.'
     });
   }
 
-  const route = selectModelRoute(request);
   let lastError: unknown;
 
   options.onEvent?.({
     type: 'status',
     requestId: options.requestId,
     phase: 'collecting_context',
-    message: route.profile === 'quick' ? 'Preparing a quick scan...' : 'Preparing the analysis request...'
+    message: `Preparing ${request.page.title} for question extraction...`
   });
+
+  if (route.provider === 'ollama') {
+    options.onEvent?.({
+      type: 'status',
+      requestId: options.requestId,
+      phase: 'requesting_backend',
+      message: 'Local AI is preparing question extraction...'
+    });
+
+    const attemptResult = await runNonStreamingOllamaAttempt(
+      {
+        request,
+        requestId: options.requestId,
+        signal: options.signal,
+        route
+      },
+      0
+    );
+    const { output, normalizationMs } = parseStructuredOutput(
+      attemptResult.rawContent,
+      request,
+      options.requestId,
+      attemptResult.finishReason
+    );
+    const completedAt = new Date().toISOString();
+    const meta = finalizeMeta(buildMeta(options.requestId, 'miss', attemptResult.timings), normalizationMs, completedAt);
+
+    options.onEvent?.({
+      type: 'complete',
+      requestId: options.requestId,
+      mode: request.mode,
+      output,
+      meta
+    });
+    return;
+  }
 
   for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt += 1) {
     try {
-      const attemptResult = await runStreamingAttempt(
+      const attemptResult = await runStreamingAttemptWithFormat(
         {
           request,
           requestId: options.requestId,
@@ -817,43 +1336,36 @@ export async function streamStructuredAnalysis(request: AnalyzeRequestBody, opti
           route
         },
         attempt,
-        options.onEvent
+        options.onEvent,
+        true
       );
-      const normalized = parseStructuredOutput(attemptResult.rawContent, request, options.requestId, attemptResult.timings);
+      const { output, normalizationMs } = parseStructuredOutput(
+        attemptResult.rawContent,
+        request,
+        options.requestId,
+        attemptResult.finishReason
+      );
       const completedAt = new Date().toISOString();
-      const meta = finalizeMeta(normalized.meta, normalized.normalizationMs, completedAt);
+      const meta = finalizeMeta(buildMeta(options.requestId, 'miss', attemptResult.timings), normalizationMs, completedAt);
 
       options.onEvent?.({
         type: 'complete',
         requestId: options.requestId,
         mode: request.mode,
-        output: normalized.output,
+        output,
         meta
       });
-
-      return {
-        output: normalized.output,
-        meta
-      };
+      return;
     } catch (error) {
       lastError = error;
-
-      if (!(error instanceof ModelServiceError) || !error.retryable || error.status === 499 || attempt >= MAX_PROVIDER_RETRIES) {
-        throw error;
+      const retryable = error instanceof ModelServiceError ? error.retryable : false;
+      if (attempt < MAX_PROVIDER_RETRIES && retryable) {
+        await wait(RETRY_DELAY_MS);
+        continue;
       }
-
-      options.onEvent?.({
-        type: 'status',
-        requestId: options.requestId,
-        phase: 'requesting_backend',
-        message: 'Retrying after a transient network issue...',
-        timings: {
-          retryCount: attempt + 1
-        }
-      });
-      await wait(RETRY_DELAY_MS * (attempt + 1));
+      throw error;
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Analysis failed.');
+  throw lastError instanceof Error ? lastError : new ModelServiceError('Structured analysis failed unexpectedly.');
 }

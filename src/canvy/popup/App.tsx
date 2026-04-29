@@ -1,20 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import '../shared/app.css';
-import { AnalysisResultCard } from '../shared/components/AnalysisResultCard';
-import { ActionTile, AppShell, GlassButton, GlassSurface, InlineNotice, MotionProvider, PromptComposer, SectionHeader, StatusPill } from '../shared/components/ui';
+import {
+  AppIcon,
+  AppShell,
+  GlassButton,
+  GlassIconButton,
+  GlassPanel,
+  GlassToolbar,
+  GhostButton,
+  Icon,
+  InlineNotice,
+  MotionProvider,
+  SectionHeader,
+  StatusPill,
+  ToggleRow,
+  WorkspaceShell
+} from '../shared/components/ui';
 import { STORAGE_KEYS } from '../shared/constants';
 import { sendRuntimeMessage } from '../shared/runtime';
-import type {
-  BootstrapPayload,
-  CancelAnalysisResponse,
-  PopupStatus,
-  StartAnalysisResponse
-} from '../shared/types';
+import type { BootstrapPayload, PopupStatus, ScreenAnalyzeActionResponse } from '../shared/types';
 
 const WORKSPACE_PANEL_PATH = 'sidepanel.html';
 
 function createRequestId() {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
 }
 
 function trimText(value: string, maxLength: number) {
@@ -33,34 +44,8 @@ function getUiErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function getBackendTone(state: string): 'success' | 'warning' | 'danger' | 'accent' {
-  switch (state) {
-    case 'connected':
-      return 'success';
-    case 'degraded':
-      return 'warning';
-    case 'offline':
-      return 'danger';
-    default:
-      return 'accent';
-  }
-}
-
-function formatBackendLabel(state: string) {
-  switch (state) {
-    case 'connected':
-      return 'Ready';
-    case 'degraded':
-      return 'Retrying';
-    case 'offline':
-      return 'Offline';
-    default:
-      return 'Checking';
-  }
-}
-
 function getNoticeTone(value: string) {
-  if (/offline|could not|unable|failed|limited|unavailable|no page/i.test(value)) {
+  if (/offline|could not|couldn|unable|failed|limited|unavailable|no clear|restricted/i.test(value)) {
     return 'warning' as const;
   }
 
@@ -72,16 +57,30 @@ export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [instructions, setInstructions] = useState('');
+  const [busyAction, setBusyAction] = useState<'open_assistant' | 'scan' | 'clear' | 'workspace' | 'quiz_mode' | null>(null);
 
   useEffect(() => {
     let mounted = true;
+
+    if (chrome.sidePanel?.setOptions) {
+      void chrome.sidePanel
+        .setOptions({
+          path: WORKSPACE_PANEL_PATH,
+          enabled: true
+        })
+        .catch((error) => {
+          console.warn('[Mako IQ launcher] Could not preconfigure side panel.', error);
+        });
+    }
 
     async function hydrate() {
       try {
         const [nextStatus, nextBootstrap] = await Promise.all([
           sendRuntimeMessage<PopupStatus>({ type: 'GET_POPUP_STATUS' }),
-          sendRuntimeMessage<BootstrapPayload>({ type: 'CANVY_GET_BOOTSTRAP', requestId: 'launcher-opened' })
+          sendRuntimeMessage<BootstrapPayload>({
+            type: 'CANVY_GET_BOOTSTRAP',
+            requestId: 'launcher-opened'
+          })
         ]);
 
         if (!mounted) {
@@ -95,8 +94,8 @@ export function App() {
           return;
         }
 
-        console.error('[Mako IQ launcher] Failed to bootstrap launcher state.', error);
-        setNotice('Could not inspect the current page.');
+        console.error('[Mako IQ launcher] Failed to inspect launcher state.', error);
+        setNotice('Could not inspect the current screen.');
       }
     }
 
@@ -120,16 +119,10 @@ export function App() {
           return current;
         }
 
-        const nextSession = (sessionChange?.newValue ?? current.session) as BootstrapPayload['session'];
-        const nextSettings = (settingsChange?.newValue ?? current.settings) as BootstrapPayload['settings'];
-
         return {
           ...current,
-          settings: nextSettings,
-          session: nextSession,
-          assistantMode: nextSession.assistantMode ?? current.assistantMode,
-          pageContext: nextSession.pageContext ?? current.pageContext,
-          context: nextSession.context ?? current.context
+          settings: (settingsChange?.newValue ?? current.settings) as BootstrapPayload['settings'],
+          session: (sessionChange?.newValue ?? current.session) as BootstrapPayload['session']
         };
       });
     };
@@ -143,132 +136,157 @@ export function App() {
     };
   }, []);
 
-  const pageState = bootstrap?.session.pageState;
-  const analysisRun = bootstrap?.session.analysisRun ?? null;
-  const analysis = pageState?.analysis ?? bootstrap?.session.lastAnalysis ?? null;
   const backendState = bootstrap?.settings.backendConnection?.state ?? 'unknown';
-  const currentPage = pageState?.currentPage;
-  const pageTitle = currentPage?.title ?? status?.pageTitle ?? 'Current page';
-  const pageUrl = currentPage?.url ?? status?.currentUrl ?? '';
+  const pageTitle = status?.pageTitle ?? 'Current page';
+  const pageUrl = status?.currentUrl ?? '';
   const pageHost = extractHost(pageUrl);
-  const isSupportedLaunchPage = status?.isSupportedLaunchPage ?? false;
-  const isRunning = Boolean(
-    analysisRun &&
-      analysisRun.phase !== 'completed' &&
-      analysisRun.phase !== 'error' &&
-      analysisRun.phase !== 'cancelled'
-  );
-  const launcherStatus =
-    pageState?.errors.analysis ??
-    pageState?.uiStatus.message ??
-    (isRunning
-      ? analysisRun?.statusLabel
-      : isSupportedLaunchPage
-        ? pageHost
-          ? `Ready for ${pageHost}`
-          : 'Ready for this page'
-        : status?.launchSupportMessage || 'Page-aware tools are limited on this tab.') ??
-    'Ready';
-  const submitDisabled = busy || isRunning || !instructions.trim() || !isSupportedLaunchPage;
-  const emptyTitle = isSupportedLaunchPage ? 'Ask about this page' : 'Workspace still available';
-  const emptyBody = isSupportedLaunchPage
-    ? 'Use the launcher for a fast answer, then move into the workspace when you need more room.'
-    : 'This tab is restricted, so page extraction is limited. The workspace can still open normally.';
+  const motionEnabled = bootstrap?.settings.motionEnabled ?? true;
+  const quizModeEnabled = bootstrap?.settings.quizModeEnabled ?? false;
+  const statusPill = useMemo(() => {
+    if (busy) {
+      return {
+        label: 'Analyzing',
+        tone: 'accent' as const
+      };
+    }
+
+    if (backendState === 'offline' || backendState === 'degraded') {
+      return {
+        label: 'AI Offline',
+        tone: 'warning' as const
+      };
+    }
+
+    return {
+      label: 'Ready',
+      tone: 'success' as const
+    };
+  }, [backendState, busy]);
 
   async function refreshStatus() {
-    setBusy(true);
-    setNotice('');
-
-    try {
-      const [nextStatus, nextBootstrap] = await Promise.all([
-        sendRuntimeMessage<PopupStatus>({ type: 'GET_POPUP_STATUS' }),
-        sendRuntimeMessage<BootstrapPayload>({ type: 'CANVY_REFRESH_ACTIVE_PAGE_CONTEXT', requestId: 'launcher-refresh' })
-      ]);
-
-      setStatus(nextStatus);
-      setBootstrap(nextBootstrap);
-    } catch (error) {
-      const message = getUiErrorMessage(error, 'Could not refresh this page.');
-      setNotice(message);
-    } finally {
-      setBusy(false);
-    }
+    const nextStatus = await sendRuntimeMessage<PopupStatus>({ type: 'GET_POPUP_STATUS' });
+    setStatus(nextStatus);
   }
 
-  async function startAnalysis(instruction: string) {
+  async function handleOpenAssistant(autoScan = false) {
     setBusy(true);
-    setNotice('');
+    setBusyAction(autoScan ? 'scan' : 'open_assistant');
+    setNotice(autoScan ? 'Scanning page...' : 'Opening assistant...');
 
     try {
-      const response = await sendRuntimeMessage<StartAnalysisResponse>({
-        type: 'CANVY_START_ANALYSIS_RUN',
+      const response = await sendRuntimeMessage<ScreenAnalyzeActionResponse>({
+        type: autoScan ? 'OPEN_ASSISTANT_PANEL_AND_SCAN' : 'OPEN_ASSISTANT_PANEL',
         requestId: createRequestId(),
-        instruction
+        autoScan
       });
 
       if (!response.ok) {
-        setNotice(response.error ?? response.message ?? 'Could not start the analysis.');
+        setNotice(response.error ?? response.message ?? 'Mako IQ could not open the assistant.');
+        return;
       }
+
+      setNotice(response.message || 'Assistant opened.');
+      await refreshStatus();
     } catch (error) {
-      const message = getUiErrorMessage(error, 'Could not start the analysis.');
-      setNotice(message);
+      setNotice(getUiErrorMessage(error, 'Mako IQ could not open the assistant on this page.'));
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
-  async function handleCancel() {
+  async function handleClearBubbles() {
     setBusy(true);
+    setBusyAction('clear');
+    setNotice('');
 
     try {
-      const response = await sendRuntimeMessage<CancelAnalysisResponse>({
-        type: 'CANVY_CANCEL_ANALYSIS',
+      const response = await sendRuntimeMessage<ScreenAnalyzeActionResponse>({
+        type: 'CLEAR_ANSWER_BUBBLES',
         requestId: createRequestId()
       });
       setNotice(response.message);
     } catch (error) {
-      setNotice(getUiErrorMessage(error, 'Could not cancel the analysis.'));
+      setNotice(getUiErrorMessage(error, 'Mako IQ could not clear bubbles on this page.'));
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
-  }
-
-  async function resolvePageWindowId() {
-    if (typeof status?.windowId === 'number') {
-      return status.windowId;
-    }
-
-    const nextStatus = await sendRuntimeMessage<PopupStatus>({ type: 'GET_POPUP_STATUS' });
-    setStatus(nextStatus);
-
-    if (typeof nextStatus.windowId !== 'number') {
-      throw new Error('Could not find the current browser window.');
-    }
-
-    return nextStatus.windowId;
   }
 
   async function handleOpenWorkspace() {
     setBusy(true);
+    setBusyAction('workspace');
     setNotice('');
 
-    try {
-      const currentWindowId = await resolvePageWindowId();
-      await chrome.sidePanel.setOptions({
-        path: WORKSPACE_PANEL_PATH,
-        enabled: true
+    const fallbackToAssistant = async (detail?: string) => {
+      console.warn('[Mako IQ launcher] Workspace open failed; opening assistant fallback.', {
+        detail
       });
-      await chrome.sidePanel.open({ windowId: currentWindowId });
+      setNotice("Couldn't open workspace. Opening assistant panel instead.");
 
-      setNotice(
-        isSupportedLaunchPage
-          ? 'Workspace opened.'
-          : 'Workspace opened. Page-specific tools are limited on this tab.'
-      );
+      try {
+        const response = await sendRuntimeMessage<ScreenAnalyzeActionResponse>({
+          type: 'OPEN_ASSISTANT_PANEL',
+          requestId: createRequestId()
+        });
+
+        if (!response.ok) {
+          setNotice(
+            `Couldn't open workspace. Opening assistant panel instead. ${response.error ?? response.message ?? ''}`.trim()
+          );
+        }
+      } catch (error) {
+        setNotice(getUiErrorMessage(error, "Couldn't open workspace. Opening assistant panel instead."));
+      }
+    };
+
+    try {
+      if (!chrome.sidePanel?.open) {
+        await fallbackToAssistant('chrome.sidePanel.open is unavailable');
+        return;
+      }
+
+      const currentWindowId = status?.windowId;
+      if (typeof currentWindowId !== 'number') {
+        await fallbackToAssistant('No active browser window id was available at click time.');
+        return;
+      }
+
+      await chrome.sidePanel.open({ windowId: currentWindowId });
+      setNotice('Workspace opened.');
     } catch (error) {
-      setNotice(getUiErrorMessage(error, 'Workspace could not open.'));
+      const detail = getUiErrorMessage(error, 'Chrome blocked the side panel request.');
+      await fallbackToAssistant(detail);
     } finally {
       setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  async function handleToggleQuizMode(checked: boolean) {
+    setBusy(true);
+    setBusyAction('quiz_mode');
+    setNotice(checked ? 'Turning on Quiz Mode...' : 'Turning off Quiz Mode...');
+
+    try {
+      const settings = await sendRuntimeMessage<BootstrapPayload['settings']>({
+        type: 'CANVY_SAVE_SETTINGS',
+        payload: {
+          quizModeEnabled: checked
+        }
+      });
+      setBootstrap((current) => (current ? { ...current, settings } : current));
+      setNotice(
+        checked
+          ? 'Quiz Mode is watching this page for question changes.'
+          : 'Quiz Mode is off. Manual Scan Page still works.'
+      );
+    } catch (error) {
+      setNotice(getUiErrorMessage(error, 'Could not update Quiz Mode.'));
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -276,128 +294,140 @@ export function App() {
     void chrome.runtime.openOptionsPage();
   }
 
-  function handleQuestionSubmit() {
-    if (submitDisabled) {
-      if (!instructions.trim()) {
-        setNotice('Add a question first.');
-      }
-      return;
-    }
-
-    void startAnalysis(instructions.trim());
-  }
-
   return (
     <MotionProvider>
-      <AppShell surface="popup" aria-label="Mako IQ launcher">
-        <div className="mako-shell mako-shell--popup">
-          <GlassSurface tone="hero">
+      <AppShell
+        surface="popup"
+        animated={motionEnabled}
+        className={motionEnabled ? undefined : 'mako-app--no-motion'}
+        aria-label="Mako IQ screen assistant"
+      >
+        <WorkspaceShell surface="popup" className="mako-launcher-shell">
+          <GlassToolbar className="mako-launcher-toolbar">
             <div className="mako-brand-row">
               <div className="mako-brand-mark">
-                <span className="mako-brand-mark__dot" aria-hidden="true" />
+                <AppIcon size={36} />
                 <div className="mako-brand-copy">
-                  <p className="mako-eyebrow">Mako IQ launcher</p>
-                  <h1 className="mako-brand-title">Answer this page fast</h1>
-                  <p className="mako-brand-caption">Toolbar click opens here first. Use the workspace only when you want depth.</p>
+                  <p className="mako-eyebrow">Mako IQ</p>
+                  <h1 className="mako-brand-title mako-brand-title--launcher">Floating Popup</h1>
+                  <p className="mako-brand-caption">Open the compact Screen Assistant or jump back to the Workspace sidebar.</p>
                 </div>
               </div>
-              <StatusPill label={formatBackendLabel(backendState)} tone={getBackendTone(backendState)} />
-            </div>
 
-            <div className="mako-context-card">
-              <div className="mako-context-card__row">
-                <p className="mako-context-card__title">{trimText(pageTitle, 96)}</p>
-                {pageHost ? <StatusPill label={pageHost} tone="neutral" /> : null}
-              </div>
-              <p className="mako-context-card__note">{trimText(launcherStatus, 140)}</p>
-              <div className="mako-actions-row">
-                <GlassButton variant="primary" size="md" onClick={() => void handleOpenWorkspace()} disabled={busy}>
-                  Open workspace
-                </GlassButton>
-                <GlassButton variant="ghost" size="sm" onClick={handleOpenSettings} disabled={busy}>
-                  Settings
-                </GlassButton>
+              <div className="mako-chip-row">
+                <StatusPill label={statusPill.label} tone={statusPill.tone} />
               </div>
             </div>
-          </GlassSurface>
+          </GlassToolbar>
 
-          <GlassSurface tone="elevated">
+          <GlassPanel tone="hero" className="mako-launcher-hero">
             <SectionHeader
-              eyebrow="Ask"
-              title="Ask about this page"
-              description={isSupportedLaunchPage ? 'Fast page-aware answer with a real submit action.' : 'Open a standard webpage to ask page-specific questions.'}
+              eyebrow="Ask about screen"
+              title="Open the floating Screen Assistant"
+              description="Launch the draggable compact popup in this tab, then scan or rescan without coming back here."
+              meta={pageHost ? <StatusPill label={pageHost} tone="neutral" icon={<Icon name="page" size={14} />} /> : undefined}
             />
 
-            <PromptComposer
-              id="mako-launcher-question"
-              label="Question"
-              rows={4}
-              value={instructions}
-              onChange={setInstructions}
-              onSubmit={handleQuestionSubmit}
-              submitLabel={isRunning ? 'Working...' : 'Submit'}
-              disabled={submitDisabled}
-              placeholder={isSupportedLaunchPage ? 'What matters here? What should I act on?' : 'Page extraction is limited on this tab.'}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  handleQuestionSubmit();
-                }
-              }}
-              footer={
-                <>
-                  <span>{isSupportedLaunchPage ? 'Shift+Enter for a new line.' : 'Workspace still works on restricted pages.'}</span>
-                  <GlassButton variant="ghost" size="sm" onClick={() => void refreshStatus()} disabled={busy || isRunning}>
-                    Refresh
-                  </GlassButton>
-                </>
-              }
-            />
-          </GlassSurface>
-
-          <div className="mako-popup-actions" aria-label="Launcher actions">
-            <ActionTile
-              title={isRunning ? 'Scanning...' : 'Summarize page'}
-              copy="Get the concise answer first."
-              kicker="Fast answer"
-              tone="accent"
-              onClick={() => void startAnalysis('Summarize this page in the clearest possible way.')}
-              disabled={busy || !isSupportedLaunchPage || isRunning}
-            />
-            <ActionTile
-              title="Pull key takeaways"
-              copy="Turn the page into notes worth keeping."
-              kicker="Notes"
-              onClick={() => void startAnalysis('Extract the most important takeaways and action items from this page.')}
-              disabled={busy || !isSupportedLaunchPage || isRunning}
-            />
-            <ActionTile
-              title="What should I do next?"
-              copy="Focus on next steps instead of summary."
-              kicker="Actions"
-              onClick={() => void startAnalysis('What are the next actions or decisions I should make from this page?')}
-              disabled={busy || !isSupportedLaunchPage || isRunning}
-            />
-            <ActionTile
-              title="Open full workspace"
-              copy="Move into the side panel for deeper work."
-              kicker="Workspace"
-              onClick={() => void handleOpenWorkspace()}
+            <GlassButton
+              variant="primary"
+              size="lg"
+              leadingIcon={<Icon name="scan" size={16} />}
+              onClick={() => void handleOpenAssistant()}
               disabled={busy}
+              loading={busyAction === 'open_assistant'}
+            >
+              {busyAction === 'open_assistant' ? 'Opening...' : 'Open Floating Popup'}
+            </GlassButton>
+
+            <div className="mako-launcher-actions mako-launcher-actions--secondary" aria-label="Screen assistant actions">
+              <button
+                type="button"
+                className="mako-quick-action mako-quick-action--primary"
+                onClick={() => void handleOpenAssistant(true)}
+                disabled={busy}
+              >
+                <span className="mako-quick-action__icon">
+                  <Icon name="scan" size={16} />
+                </span>
+                <span className="mako-quick-action__copy">
+                  <strong>Open Popup + Scan</strong>
+                  <span>{busyAction === 'scan' ? 'Scanning...' : 'Launch panel and analyze'}</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="mako-quick-action"
+                onClick={() => void handleClearBubbles()}
+                disabled={busy}
+              >
+                <span className="mako-quick-action__icon">
+                  <Icon name="close" size={16} />
+                </span>
+                <span className="mako-quick-action__copy">
+                  <strong>Clear Bubbles</strong>
+                  <span>Remove screen answers</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="mako-quick-action"
+                onClick={() => void handleOpenWorkspace()}
+                disabled={busy}
+              >
+                <span className="mako-quick-action__icon">
+                  <Icon name="workspace" size={16} />
+                </span>
+                <span className="mako-quick-action__copy">
+                  <strong>Open Workspace</strong>
+                  <span>Open the sidebar</span>
+                </span>
+              </button>
+            </div>
+
+            <div className="mako-mini-grid mako-mini-grid--compact" aria-label="Current screen summary">
+              <div className="mako-mini-card mako-mini-card--compact">
+                <span className="mako-eyebrow">Screen Context</span>
+                <strong>{trimText(pageTitle, 72) || 'Current tab'}</strong>
+              </div>
+              <div className="mako-mini-card mako-mini-card--compact">
+                <span className="mako-eyebrow">Output</span>
+                <strong>Answer Bubbles</strong>
+              </div>
+              <div className="mako-mini-card mako-mini-card--compact">
+                <span className="mako-eyebrow">Mode</span>
+                <strong>Questions</strong>
+              </div>
+            </div>
+
+            <ToggleRow
+              title="Quiz Mode"
+              description="Quiz Mode needs access to this page to detect questions and show study assistance."
+              checked={quizModeEnabled}
+              onChange={(checked) => void handleToggleQuizMode(checked)}
             />
-          </div>
+          </GlassPanel>
 
           {notice ? <InlineNotice tone={getNoticeTone(notice)}>{notice}</InlineNotice> : null}
 
-          <AnalysisResultCard
-            analysis={analysis}
-            analysisRun={analysisRun}
-            compact
-            onCancel={isRunning ? () => void handleCancel() : null}
-            emptyTitle={emptyTitle}
-            emptyBody={emptyBody}
-          />
-        </div>
+          <div className="mako-chip-row">
+            <GhostButton
+              size="sm"
+              leadingIcon={<Icon name="refresh" size={14} />}
+              onClick={() => void refreshStatus()}
+              disabled={busy}
+            >
+              Refresh
+            </GhostButton>
+            <GlassIconButton
+              icon={<Icon name="settings" size={15} />}
+              label="Open settings"
+              onClick={handleOpenSettings}
+              disabled={busy}
+            />
+          </div>
+        </WorkspaceShell>
       </AppShell>
     </MotionProvider>
   );

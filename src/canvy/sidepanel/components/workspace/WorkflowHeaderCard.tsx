@@ -84,7 +84,7 @@ export function WorkflowHeaderCard({ workflowState, workflowRoute, classificatio
         </div>
       ) : null}
       <div className="canvy-panel-inline-result">
-        <div className="canvy-eyebrow">What Canvy sees here</div>
+        <div className="canvy-eyebrow">What Mako IQ sees here</div>
         <p className="canvy-copy-block">{descriptionForWorkflow(workflowState?.currentWorkflow)}</p>
         {workflowState?.reasons.length ? (
           <ul className="canvy-list">

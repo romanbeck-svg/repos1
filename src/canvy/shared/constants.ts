@@ -5,7 +5,14 @@ export const STORAGE_KEYS = {
   settings: 'makoiq.settings',
   session: 'makoiq.session',
   launcherWindow: 'makoiq.launcherWindow',
-  overlayUi: 'makoiq.overlayUi'
+  overlayUi: 'makoiq.overlayUi',
+  screenBubblePositions: 'makoiq.screenBubblePositions',
+  screenPreScanContext: 'makoiq.screenPreScanContext',
+  screenAnswerCache: 'makoiq.screenAnswerCache',
+  activeScreenScans: 'makoiq.activeScreenScans',
+  panelPosition: 'mako.panel.position',
+  panelSize: 'mako.panel.size',
+  panelCollapsed: 'mako.panel.collapsed'
 } as const;
 
 export const LEGACY_STORAGE_KEYS = {
@@ -13,7 +20,7 @@ export const LEGACY_STORAGE_KEYS = {
   session: 'canvy.session'
 } as const;
 
-export const CANVY_ACCENT = '#2d7ff9';
+export const CANVY_ACCENT = '#22D3EE';
 
 export function createMessage(
   role: SessionMessage['role'],
@@ -40,6 +47,7 @@ export function createDefaultSettings(apiBaseUrl = DEFAULT_API_BASE_URL, apiBase
       state: 'unknown',
       checkedAt: now
     },
+    quizModeEnabled: false,
     debugMode: false,
     motionEnabled: true
   };
@@ -99,7 +107,7 @@ export function createDefaultSession(): AssignmentSessionState {
       createMessage(
         'assistant',
         'status',
-        "You're using Mako IQ. Scan the current page here, or open the sidebar when you need more room."
+        "You're using Mako IQ. Analyze the visible screen to place answer bubbles near detected questions."
       )
     ],
     lastAnalysis: undefined,

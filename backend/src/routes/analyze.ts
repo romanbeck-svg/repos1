@@ -4,6 +4,8 @@ import { taskLimiter } from '../middleware/security.js';
 import { prepareJsonLineStream, writeJsonLine } from '../utils/stream.js';
 import { generateStructuredAnalysis, ModelServiceError, streamStructuredAnalysis } from '../services/model.js';
 import { validateAnalyzeRequest } from '../utils/validation.js';
+import { env } from '../config/env.js';
+import { recordAiRequest } from '../lib/runtime-status.js';
 
 export const analyzeRouter = Router();
 
@@ -13,14 +15,21 @@ function createRequestId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `analysis-${Date.now()}`;
 }
 
-function logAnalysisRequest(requestId: string, request: { mode: string; instruction: string; page: { url: string; title: string; text: string }; screenshotBase64: string | null }) {
+function logAnalysisRequest(
+  requestId: string,
+  request: { mode: string; instruction: string; page: { url: string; title: string; text: string; blocks: string[]; questionCandidates: { id: string }[] }; screenshotBase64: string | null },
+  origin?: string
+) {
   logger.info(
     {
       requestId,
       mode: request.mode,
+      requestOrigin: origin ?? 'none',
       pageUrl: request.page.url,
       pageTitle: request.page.title,
       pageTextLength: request.page.text.length,
+      blockCount: request.page.blocks.length,
+      candidateQuestionCount: request.page.questionCandidates.length,
       hasInstruction: Boolean(request.instruction),
       hasScreenshot: Boolean(request.screenshotBase64)
     },
@@ -39,10 +48,16 @@ analyzeRouter.post('/', async (req, res) => {
 
   const request = validation.data;
   const requestId = createRequestId();
-  logAnalysisRequest(requestId, request);
+  logAnalysisRequest(requestId, request, req.get('origin') ?? undefined);
 
   try {
     const result = await generateStructuredAnalysis(request, requestId);
+    recordAiRequest({
+      ok: true,
+      route: '/api/analyze',
+      provider: env.aiProvider,
+      message: 'Analysis request completed.'
+    });
     return res.json({
       ok: true,
       mode: request.mode,
@@ -51,6 +66,13 @@ analyzeRouter.post('/', async (req, res) => {
     });
   } catch (error) {
     if (error instanceof ModelServiceError) {
+      recordAiRequest({
+        ok: false,
+        route: '/api/analyze',
+        provider: env.aiProvider,
+        status: error.status,
+        message: error.exposeMessage
+      });
       logger.error(
         {
           requestId,
@@ -62,10 +84,18 @@ analyzeRouter.post('/', async (req, res) => {
       );
       return res.status(error.status).json({
         ok: false,
-        error: error.exposeMessage
+        error: error.exposeMessage,
+        resultState: 'transport_error'
       });
     }
 
+    recordAiRequest({
+      ok: false,
+      route: '/api/analyze',
+      provider: env.aiProvider,
+      status: 500,
+      message: 'Mako IQ could not complete the analysis request.'
+    });
     logger.error(
       {
         requestId,
@@ -76,7 +106,8 @@ analyzeRouter.post('/', async (req, res) => {
     );
     return res.status(500).json({
       ok: false,
-      error: 'Mako IQ could not complete the analysis request.'
+      error: 'Mako IQ could not complete the analysis request.',
+      resultState: 'transport_error'
     });
   }
 });
@@ -92,7 +123,7 @@ analyzeRouter.post('/stream', async (req, res) => {
 
   const request = validation.data;
   const requestId = createRequestId();
-  logAnalysisRequest(requestId, request);
+  logAnalysisRequest(requestId, request, req.get('origin') ?? undefined);
 
   prepareJsonLineStream(res);
 
@@ -109,9 +140,22 @@ analyzeRouter.post('/stream', async (req, res) => {
       }
     });
 
+    recordAiRequest({
+      ok: true,
+      route: '/api/analyze/stream',
+      provider: env.aiProvider,
+      message: 'Streaming analysis request completed.'
+    });
     return res.end();
   } catch (error) {
     if (error instanceof ModelServiceError) {
+      recordAiRequest({
+        ok: false,
+        route: '/api/analyze/stream',
+        provider: env.aiProvider,
+        status: error.status,
+        message: error.exposeMessage
+      });
       logger.error(
         {
           requestId,
@@ -124,11 +168,19 @@ analyzeRouter.post('/stream', async (req, res) => {
       writeJsonLine(res, {
         type: 'error',
         requestId,
-        error: error.exposeMessage
+        error: error.exposeMessage,
+        resultState: 'transport_error'
       });
       return res.end();
     }
 
+    recordAiRequest({
+      ok: false,
+      route: '/api/analyze/stream',
+      provider: env.aiProvider,
+      status: 500,
+      message: 'Mako IQ could not complete the analysis request.'
+    });
     logger.error(
       {
         requestId,
@@ -140,7 +192,8 @@ analyzeRouter.post('/stream', async (req, res) => {
     writeJsonLine(res, {
       type: 'error',
       requestId,
-        error: 'Mako IQ could not complete the analysis request.'
+      error: 'Mako IQ could not complete the analysis request.',
+      resultState: 'transport_error'
     });
     return res.end();
   } finally {

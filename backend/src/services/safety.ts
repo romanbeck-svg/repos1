@@ -51,8 +51,8 @@ export function sanitizeCanvasContext(input: unknown): CanvasContext | null {
     pageKind: sanitizeText(context.pageKind, 60) || 'unknown',
     quizSafetyMode: sanitizeText(context.quizSafetyMode, 60) || 'none',
     sourceUrl: sanitizeText(context.sourceUrl, 500),
-    title: sanitizeText(context.title, 240) || 'Canvas item',
-    courseName: sanitizeText(context.courseName, 240) || 'Canvas course',
+    title: sanitizeText(context.title, 240) || 'Page item',
+    courseName: sanitizeText(context.courseName, 240) || 'Page context',
     courseId: sanitizeText(context.courseId, 80) || undefined,
     assignmentId: sanitizeText(context.assignmentId, 80) || undefined,
     dueAtText: sanitizeText(context.dueAtText, 200) || undefined,
@@ -93,6 +93,21 @@ export function sanitizeScanPage(input: unknown): ScanPagePayload | null {
     url: sanitizeText(page.url, 500),
     readableText: sanitizeText(page.readableText, 12000),
     headings: sanitizeStringArray(page.headings, 12, 200),
+    contentBlocks: sanitizeStringArray((page as Partial<ScanPagePayload>).contentBlocks, 24, 280),
+    questionCandidates: Array.isArray((page as Partial<ScanPagePayload>).questionCandidates)
+      ? ((page as Partial<ScanPagePayload>).questionCandidates ?? [])
+          .map((candidate) => ({
+            id: sanitizeText(candidate?.id, 80) || crypto.randomUUID(),
+            question: sanitizeText(candidate?.question, 320),
+            sectionLabel: sanitizeText(candidate?.sectionLabel, 140) || undefined,
+            nearbyText: sanitizeStringArray(candidate?.nearbyText, 4, 220),
+            answerChoices: sanitizeStringArray(candidate?.answerChoices, 6, 140),
+            sourceAnchor: sanitizeText(candidate?.sourceAnchor, 120),
+            selectorHint: sanitizeText(candidate?.selectorHint, 160) || undefined
+          }))
+          .filter((candidate) => candidate.question || candidate.sourceAnchor)
+          .slice(0, 12)
+      : [],
     sourceType: page.sourceType === 'tone_sample' ? 'tone_sample' : 'reference',
     pageType: page.pageType === 'canvas' || page.pageType === 'docs' ? page.pageType : 'generic',
     sourceMode: page.sourceMode === 'docs_dom' || page.sourceMode === 'image_ocr' ? page.sourceMode : 'dom',

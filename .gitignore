@@ -4,6 +4,7 @@ backend/node_modules/
 dist/
 backend/dist/
 package/
+apps/companion/release/
 
 .env
 .env.*

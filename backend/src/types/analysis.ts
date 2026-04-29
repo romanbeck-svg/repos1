@@ -2,6 +2,15 @@ export const ANALYSIS_MODES = ['answer', 'summary', 'quick_summary', 'chart', 's
 
 export type AnalysisMode = (typeof ANALYSIS_MODES)[number];
 export type AnalysisCacheStatus = 'hit' | 'miss';
+export type AnalysisResultState =
+  | 'success'
+  | 'no_questions'
+  | 'insufficient_context'
+  | 'invalid_ai_output'
+  | 'transport_error';
+export type AnalysisAiTag = 'success' | 'no_questions' | 'insufficient_context' | 'error';
+export type AnalysisExtractionMode = 'dom' | 'vision' | 'hybrid';
+export type AnalysisQuestionStatus = 'answered' | 'insufficient_context';
 export type AnalysisRunPhase =
   | 'idle'
   | 'collecting_context'
@@ -12,24 +21,63 @@ export type AnalysisRunPhase =
   | 'error'
   | 'cancelled';
 
-export interface AnalysisChartDataset {
-  label: string;
-  data: number[];
+export interface AnalysisQuestionCandidate {
+  id: string;
+  question: string;
+  sectionLabel?: string;
+  nearbyText: string[];
+  answerChoices: string[];
+  sourceAnchor: string;
+  selectorHint?: string;
 }
 
-export interface AnalysisChart {
-  type: 'bar' | 'line' | 'pie' | 'table';
+export interface AnalysisPagePayload {
+  url: string;
   title: string;
-  labels: string[];
-  datasets: AnalysisChartDataset[];
+  text: string;
+  headings: string[];
+  blocks: string[];
+  questionCandidates: AnalysisQuestionCandidate[];
+  extractionNotes?: string[];
+}
+
+export interface AnalyzeRequestBody {
+  mode: AnalysisMode;
+  instruction: string;
+  page: AnalysisPagePayload;
+  screenshotBase64: string | null;
+}
+
+export interface StructuredQuestionAnswer {
+  id: string;
+  question: string;
+  answer: string;
+  context: string;
+  answered: boolean;
+  status: AnalysisQuestionStatus;
+  confidence: number;
+  evidence: string[];
+  source_anchor: string;
+}
+
+export interface AnalysisValidationSummary {
+  modelCallSucceeded: boolean;
+  finishReason: string;
+  parseSuccess: boolean;
+  schemaValid: boolean;
+  echoGuardHit: boolean;
+  candidateQuestionCount: number;
+  answeredQuestionCount: number;
 }
 
 export interface StructuredAnalysisOutput {
-  title: string;
-  text: string;
-  bullets: string[];
-  chart: AnalysisChart | null;
-  actions: string[];
+  resultState: Exclude<AnalysisResultState, 'transport_error'>;
+  ai_tag: AnalysisAiTag;
+  extraction_mode: AnalysisExtractionMode;
+  questions: StructuredQuestionAnswer[];
+  aiTaggedSuccessfully: boolean;
+  validation: AnalysisValidationSummary;
+  message: string;
 }
 
 export interface AnalysisTimingMetrics {
@@ -48,19 +96,6 @@ export interface AnalysisTimingMetrics {
   retryCount?: number;
 }
 
-export interface AnalysisPagePayload {
-  url: string;
-  title: string;
-  text: string;
-}
-
-export interface AnalyzeRequestBody {
-  mode: AnalysisMode;
-  instruction: string;
-  page: AnalysisPagePayload;
-  screenshotBase64: string | null;
-}
-
 export interface AnalysisResponseMeta {
   requestId?: string;
   timings?: AnalysisTimingMetrics;
@@ -77,6 +112,8 @@ export interface AnalyzeSuccessResponse {
 export interface AnalyzeFailureResponse {
   ok: false;
   error: string;
+  resultState: 'transport_error';
+  meta?: AnalysisResponseMeta;
 }
 
 export interface AnalysisStreamStatusEvent {
@@ -107,6 +144,7 @@ export interface AnalysisStreamErrorEvent {
   type: 'error';
   requestId: string;
   error: string;
+  resultState?: 'transport_error';
 }
 
 export type AnalysisStreamEvent =

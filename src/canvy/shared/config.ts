@@ -1,6 +1,6 @@
 import type { ApiBaseUrlSource } from './types';
 
-export const DEFAULT_API_BASE_URL = 'http://localhost:8787';
+export const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8787';
 export const API_BASE_URL_ENV_KEYS = ['VITE_MAKOIQ_API_BASE_URL', 'VITE_CANVY_API_BASE_URL'] as const;
 type ApiBaseUrlEnvKey = (typeof API_BASE_URL_ENV_KEYS)[number];
 

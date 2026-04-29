@@ -272,7 +272,7 @@ function generalReasons(input: WorkflowClassificationInput, detectedSignals: str
     detectedSignals.length ? `Detected signals: ${detectedSignals.slice(0, 4).join(', ')}.` : undefined
   ].filter(Boolean) as string[];
 
-  return reasons.length ? reasons.slice(0, 4) : ['The current page has limited task-specific signals, so Canvy is staying in general mode.'];
+  return reasons.length ? reasons.slice(0, 4) : ['The current page has limited task-specific signals, so Mako IQ is staying in general mode.'];
 }
 
 export function classifyWorkflow(input: WorkflowClassificationInput): WorkflowClassification {
@@ -292,7 +292,7 @@ export function classifyWorkflow(input: WorkflowClassificationInput): WorkflowCl
   const reasons = chooseGeneral ? generalReasons(input, detectedSignals) : best.reasons;
   const workflowDetectedSignals = unique([...(chooseGeneral ? detectedSignals : best.detectedSignals), ...detectedSignals]).slice(0, 10);
 
-  console.info('[Canvy workflow] Workflow classification result.', {
+  console.info('[Mako IQ workflow] Workflow classification result.', {
     workflowType,
     confidence,
     reasons,

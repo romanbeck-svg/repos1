@@ -6,10 +6,11 @@ interface CollapsibleSectionProps {
   title: string;
   subtitle?: string;
   defaultOpen?: boolean;
+  animated?: boolean;
   children: ReactNode;
 }
 
-export function CollapsibleSection({ title, subtitle, defaultOpen = false, children }: CollapsibleSectionProps) {
+export function CollapsibleSection({ title, subtitle, defaultOpen = false, animated = true, children }: CollapsibleSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -33,10 +34,10 @@ export function CollapsibleSection({ title, subtitle, defaultOpen = false, child
         {open ? (
           <m.div
             className="mako-accordion__content"
-            initial={{ height: 0, opacity: 0 }}
+            initial={animated ? { height: 0, opacity: 0 } : false}
             animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: [0.2, 0.9, 0.24, 1] }}
+            exit={animated ? { height: 0, opacity: 0 } : { opacity: 0 }}
+            transition={{ duration: animated ? 0.18 : 0.01, ease: [0.22, 1, 0.36, 1] }}
           >
             <div className="mako-accordion__body">{children}</div>
           </m.div>

@@ -15,7 +15,7 @@ const TABS: Array<{ id: PanelTabId; label: string }> = [
 
 export function PanelTabs({ activeTab, onChange }: PanelTabsProps) {
   return (
-    <nav className="canvy-panel-tabs" aria-label="Canvy workspace tabs">
+    <nav className="canvy-panel-tabs" aria-label="Mako IQ workspace tabs">
       {TABS.map((tab) => (
         <button
           key={tab.id}

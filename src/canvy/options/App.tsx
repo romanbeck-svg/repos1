@@ -1,7 +1,21 @@
 import { useEffect, useState } from 'react';
 import '../shared/app.css';
 import { API_BASE_URL_ENV_KEYS } from '../shared/config';
-import { AppShell, GlassButton, GlassSurface, InlineNotice, MotionProvider, SectionHeader, StatusPill } from '../shared/components/ui';
+import {
+  AppIcon,
+  AppShell,
+  GhostButton,
+  GlassButton,
+  GlassInput,
+  GlassPanel,
+  GlassToolbar,
+  InlineNotice,
+  MotionProvider,
+  SectionHeader,
+  StatusPill,
+  ToggleRow,
+  WorkspaceShell
+} from '../shared/components/ui';
 import { sendRuntimeMessage } from '../shared/runtime';
 import type { BootstrapPayload, CanvySettings } from '../shared/types';
 
@@ -10,7 +24,9 @@ export function App() {
   const [status, setStatus] = useState('');
 
   useEffect(() => {
-    void sendRuntimeMessage<BootstrapPayload>({ type: 'CANVY_GET_BOOTSTRAP' }).then((bootstrap) => setSettings(bootstrap.settings));
+    void sendRuntimeMessage<BootstrapPayload>({ type: 'CANVY_GET_BOOTSTRAP' }).then((bootstrap) =>
+      setSettings(bootstrap.settings)
+    );
   }, []);
 
   async function save() {
@@ -24,116 +40,104 @@ export function App() {
 
   return (
     <MotionProvider>
-      <AppShell surface="options" aria-label="Mako IQ settings">
-        <div className="mako-shell mako-shell--options">
-          <GlassSurface tone="hero">
-            <SectionHeader
-              eyebrow="Settings"
-              title="Extension settings"
-              description="Popup first, workspace intentional, overlay lightweight. These settings stay local to the extension."
-              meta={<StatusPill label="Local" tone="accent" />}
-            />
-          </GlassSurface>
+      <AppShell
+        surface="options"
+        animated={settings?.motionEnabled !== false}
+        className={settings?.motionEnabled === false ? 'mako-app--no-motion' : undefined}
+        aria-label="Mako IQ settings"
+      >
+        <WorkspaceShell surface="options">
+          <GlassToolbar>
+            <div className="mako-brand-row">
+              <div className="mako-brand-mark">
+                <AppIcon size={38} />
+                <div className="mako-brand-copy">
+                  <p className="mako-eyebrow">Settings</p>
+                  <h1 className="mako-brand-title">Extension controls</h1>
+                  <p className="mako-brand-caption">
+                    Keep only the settings that change how Mako IQ behaves day to day.
+                  </p>
+                </div>
+              </div>
+              <StatusPill label="Local" tone="accent" />
+            </div>
+          </GlassToolbar>
 
-          <GlassSurface tone="elevated">
+          <GlassPanel tone="elevated">
             <SectionHeader
               eyebrow="Preferences"
               title="Core controls"
-              description="Keep only the controls that affect how Mako IQ behaves day to day."
+              description="Workspace opens from the toolbar, floating popup stays compact, answer bubbles stay lightweight."
             />
 
             <div className="mako-toggle-list">
-              <label className="mako-toggle">
-                <div className="mako-toggle__copy">
-                  <span className="mako-toggle__title">Onboarding complete</span>
-                  <span className="mako-toggle__description">Marks the initial setup flow as finished.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(settings?.configured)}
-                  onChange={(event) =>
-                    setSettings((current) =>
-                      current
-                        ? {
-                            ...current,
-                            configured: event.target.checked
-                          }
-                        : current
-                    )
-                  }
-                />
-              </label>
-
-              <label className="mako-toggle">
-                <div className="mako-toggle__copy">
-                  <span className="mako-toggle__title">Tone consent saved</span>
-                  <span className="mako-toggle__description">Stores whether tone personalization has already been approved.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(settings?.toneConsentGranted)}
-                  onChange={(event) =>
-                    setSettings((current) =>
-                      current
-                        ? {
-                            ...current,
-                            toneConsentGranted: event.target.checked
-                          }
-                        : current
-                    )
-                  }
-                />
-              </label>
-
-              <label className="mako-toggle">
-                <div className="mako-toggle__copy">
-                  <span className="mako-toggle__title">Motion</span>
-                  <span className="mako-toggle__description">Enables the quick glass transitions used across popup, workspace, and overlay.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(settings?.motionEnabled)}
-                  onChange={(event) =>
-                    setSettings((current) =>
-                      current
-                        ? {
-                            ...current,
-                            motionEnabled: event.target.checked
-                          }
-                        : current
-                    )
-                  }
-                />
-              </label>
-
-              <label className="mako-toggle">
-                <div className="mako-toggle__copy">
-                  <span className="mako-toggle__title">Debug mode</span>
-                  <span className="mako-toggle__description">Keeps extra diagnostics available for troubleshooting.</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={Boolean(settings?.debugMode)}
-                  onChange={(event) =>
-                    setSettings((current) =>
-                      current
-                        ? {
-                            ...current,
-                            debugMode: event.target.checked
-                          }
-                        : current
-                    )
-                  }
-                />
-              </label>
+              <ToggleRow
+                title="Onboarding complete"
+                description="Marks the initial setup flow as finished."
+                checked={Boolean(settings?.configured)}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current
+                      ? {
+                          ...current,
+                          configured: checked
+                        }
+                      : current
+                  )
+                }
+              />
+              <ToggleRow
+                title="Tone consent saved"
+                description="Stores whether tone personalization has already been approved."
+                checked={Boolean(settings?.toneConsentGranted)}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current
+                      ? {
+                          ...current,
+                          toneConsentGranted: checked
+                        }
+                      : current
+                  )
+                }
+              />
+              <ToggleRow
+                title="Motion"
+                description="Enables the quick glass transitions used across the workspace, floating popup, and answer bubbles."
+                checked={Boolean(settings?.motionEnabled)}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current
+                      ? {
+                          ...current,
+                          motionEnabled: checked
+                        }
+                      : current
+                  )
+                }
+              />
+              <ToggleRow
+                title="Debug mode"
+                description="Keeps extra diagnostics available for troubleshooting."
+                checked={Boolean(settings?.debugMode)}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current
+                      ? {
+                          ...current,
+                          debugMode: checked
+                        }
+                      : current
+                  )
+                }
+              />
             </div>
 
             <label className="mako-field">
               <span className="mako-field__label">API base URL</span>
-              <input
-                className="mako-input"
+              <GlassInput
                 type="url"
-                placeholder="http://localhost:8787"
+                placeholder="http://127.0.0.1:8787"
                 value={settings?.apiBaseUrl ?? ''}
                 onChange={(event) =>
                   setSettings((current) =>
@@ -151,17 +155,15 @@ export function App() {
 
             <p className="mako-muted">
               Resolved from <strong>{settings?.apiBaseUrlSource ?? 'default'}</strong>. The build-time default comes from{' '}
-              <code>{API_BASE_URL_ENV_KEYS[0]}</code>. Use only the backend origin here, for example{' '}
-              <code>https://your-service.onrender.com</code>.
+              <code>{API_BASE_URL_ENV_KEYS[0]}</code>. Use only the backend origin here, normally{' '}
+              <code>http://127.0.0.1:8787</code>.
             </p>
 
-            <div className="mako-actions-row">
+            <div className="mako-chip-row">
               <GlassButton variant="primary" onClick={() => void save()}>
                 Save settings
               </GlassButton>
-              <GlassButton variant="ghost" onClick={() => window.location.reload()}>
-                Reload
-              </GlassButton>
+              <GhostButton onClick={() => window.location.reload()}>Reload</GhostButton>
             </div>
 
             <p className="mako-muted">
@@ -169,8 +171,8 @@ export function App() {
             </p>
 
             {status ? <InlineNotice tone="success">{status}</InlineNotice> : null}
-          </GlassSurface>
-        </div>
+          </GlassPanel>
+        </WorkspaceShell>
       </AppShell>
     </MotionProvider>
   );

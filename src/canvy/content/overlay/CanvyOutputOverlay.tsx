@@ -1,20 +1,67 @@
-import { type FormEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { m } from 'motion/react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createDefaultOverlayUiState, STORAGE_KEYS } from '../../shared/constants';
-import { GlassButton, IconButton, MotionProvider, StatusPill } from '../../shared/components/ui';
-import { useDripReveal, useReducedMotionPreference } from '../../shared/hooks/useDripReveal';
+import {
+  FollowUpComposer,
+  FloatingPanel,
+  GhostButton,
+  GlassIconButton,
+  Icon,
+  InlineNotice,
+  StatusPill
+} from '../../shared/components/ui';
 import { sendRuntimeMessage } from '../../shared/runtime';
-import type {
-  AssignmentSessionState,
-  CancelAnalysisResponse,
-  CanvySettings,
-  OverlayUiState,
-  StartAnalysisResponse
-} from '../../shared/types';
-import type { WorkflowOverlayProps } from './types';
+import { useReducedMotionPreference } from '../../shared/hooks/useDripReveal';
+import type { CanvySettings, OverlayUiState, StartAnalysisResponse } from '../../shared/types';
+import type { OverlayQuestionViewModel, WorkflowOverlayProps } from './types';
+
+const HIGHLIGHT_STYLE_ID = 'mako-question-highlight-style';
+const HIGHLIGHT_CLASS = 'mako-question-highlight';
+const HIGHLIGHT_ACTIVE_CLASS = 'mako-question-highlight--active';
+const VIEWPORT_MARGIN = 16;
+const BUBBLE_GAP = 18;
+const DEFAULT_BUBBLE_WIDTH = 360;
+const DEFAULT_BUBBLE_HEIGHT = 232;
+const MIN_WINDOW_WIDTH = 320;
+const MIN_WINDOW_HEIGHT = 280;
+const FOLLOW_UP_PLACEHOLDER = 'Ask a follow-up...';
+
+const HIGHLIGHT_CSS = `
+  [data-mako-question-anchor].${HIGHLIGHT_CLASS} {
+    position: relative !important;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.14), rgba(15, 23, 32, 0.12)) !important;
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0.18),
+      0 14px 34px rgba(5, 7, 10, 0.18) !important;
+    transition:
+      box-shadow 180ms ease,
+      background 180ms ease,
+      outline-color 180ms ease;
+    outline: 1px solid rgba(34, 211, 238, 0.16);
+    outline-offset: 4px;
+  }
+
+  [data-mako-question-anchor].${HIGHLIGHT_ACTIVE_CLASS} {
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.18), rgba(15, 23, 32, 0.18)) !important;
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0.28),
+      0 18px 40px rgba(5, 7, 10, 0.24) !important;
+    outline-color: rgba(34, 211, 238, 0.26);
+  }
+`;
+
+type OverlayPlacement = 'right' | 'left' | 'bottom' | 'top' | 'dock-right' | 'dock-left';
+
+interface OverlayPosition {
+  left: number;
+  top: number;
+  placement: OverlayPlacement;
+}
 
 function createRequestId() {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
 }
 
 function sanitizeText(value: string | null | undefined, fallback = '') {
@@ -22,85 +69,353 @@ function sanitizeText(value: string | null | undefined, fallback = '') {
   return text || fallback;
 }
 
-function sanitizeNotes(values: string[] | undefined, maxItems = 3) {
-  return (values ?? [])
-    .map((value) => sanitizeText(value))
-    .filter(Boolean)
-    .slice(0, maxItems);
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
-function normalizeUrl(value: string | undefined) {
-  if (!value) {
-    return '';
-  }
-
-  try {
-    const url = new URL(value, window.location.href);
-    url.hash = '';
-    return url.href;
-  } catch {
-    return value.replace(/#.*$/, '');
-  }
+function isInteractivePointerTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('button, input, textarea, select, a, [role="button"]'));
 }
 
-function matchesCurrentPage(candidate: string | undefined, fallback: string | undefined) {
-  const currentUrl = normalizeUrl(window.location.href);
-  const candidateUrl = normalizeUrl(candidate);
-  const fallbackUrl = normalizeUrl(fallback);
-  return Boolean(candidateUrl && candidateUrl === currentUrl) || Boolean(fallbackUrl && fallbackUrl === currentUrl);
-}
-
-function clampOverlayUi(next: OverlayUiState): OverlayUiState {
-  const minLeft = 8;
-  const minTop = 8;
-  const maxWidth = Math.max(320, window.innerWidth - 16);
-  const maxHeight = Math.max(220, window.innerHeight - 16);
-  const width = Math.min(Math.max(next.width, 320), maxWidth);
-  const height = Math.min(Math.max(next.height, 220), maxHeight);
-  const maxLeft = Math.max(minLeft, window.innerWidth - width - 8);
-  const maxTop = Math.max(minTop, window.innerHeight - (next.collapsed ? 88 : height) - 8);
-
+function createViewportOverlayUiState() {
+  const base = createDefaultOverlayUiState();
   return {
-    ...next,
-    width,
-    height,
-    left: Math.min(Math.max(next.left, minLeft), maxLeft),
-    top: Math.min(Math.max(next.top, minTop), maxTop)
+    ...base,
+    left: Math.max(VIEWPORT_MARGIN, window.innerWidth - base.width - VIEWPORT_MARGIN),
+    top: Math.max(VIEWPORT_MARGIN, 88)
   };
 }
 
-async function persistOverlayUiState(next: OverlayUiState) {
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.overlayUi]: next
-  });
+function clampWindowPosition(uiState: OverlayUiState) {
+  const maxWidth = Math.max(MIN_WINDOW_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
+  const maxHeight = Math.max(MIN_WINDOW_HEIGHT, window.innerHeight - VIEWPORT_MARGIN * 2);
+  const width = clamp(uiState.width || createViewportOverlayUiState().width, MIN_WINDOW_WIDTH, maxWidth);
+  const height = clamp(uiState.height || createViewportOverlayUiState().height, MIN_WINDOW_HEIGHT, maxHeight);
+  const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
+  const maxTop = Math.max(
+    VIEWPORT_MARGIN,
+    window.innerHeight - (uiState.collapsed ? 72 : height) - VIEWPORT_MARGIN
+  );
+
+  return {
+    ...uiState,
+    width,
+    height,
+    left: clamp(uiState.left, VIEWPORT_MARGIN, maxLeft),
+    top: clamp(uiState.top, VIEWPORT_MARGIN, maxTop)
+  };
+}
+
+function findAnchorElement(sourceAnchor: string) {
+  const anchor = sanitizeText(sourceAnchor);
+  if (!anchor) {
+    return null;
+  }
+
+  return document.querySelector<HTMLElement>(`[data-mako-question-anchor="${anchor}"]`);
+}
+
+function intersectionArea(
+  leftRect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>,
+  rightRect: Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>
+) {
+  const width = Math.max(0, Math.min(leftRect.right, rightRect.right) - Math.max(leftRect.left, rightRect.left));
+  const height = Math.max(0, Math.min(leftRect.bottom, rightRect.bottom) - Math.max(leftRect.top, rightRect.top));
+  return width * height;
+}
+
+function buildBubbleRect(left: number, top: number, width: number, height: number) {
+  return {
+    left,
+    top,
+    right: left + width,
+    bottom: top + height
+  };
+}
+
+function clampBubblePosition(left: number, top: number, width: number, height: number) {
+  const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - width - VIEWPORT_MARGIN);
+  const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
+
+  return {
+    left: clamp(left, VIEWPORT_MARGIN, maxLeft),
+    top: clamp(top, VIEWPORT_MARGIN, maxTop)
+  };
+}
+
+function computeAnchoredPosition(anchorRect: DOMRect, bubbleWidth: number, bubbleHeight: number): OverlayPosition {
+  const candidates: Array<{ placement: OverlayPlacement; left: number; top: number }> = [
+    {
+      placement: 'right',
+      left: anchorRect.right + BUBBLE_GAP,
+      top: anchorRect.top + anchorRect.height / 2 - bubbleHeight / 2
+    },
+    {
+      placement: 'left',
+      left: anchorRect.left - bubbleWidth - BUBBLE_GAP,
+      top: anchorRect.top + anchorRect.height / 2 - bubbleHeight / 2
+    },
+    {
+      placement: 'bottom',
+      left: anchorRect.left + anchorRect.width / 2 - bubbleWidth / 2,
+      top: anchorRect.bottom + BUBBLE_GAP
+    },
+    {
+      placement: 'top',
+      left: anchorRect.left + anchorRect.width / 2 - bubbleWidth / 2,
+      top: anchorRect.top - bubbleHeight - BUBBLE_GAP
+    }
+  ];
+
+  let best = {
+    placement: 'dock-right' as OverlayPlacement,
+    left: Math.max(VIEWPORT_MARGIN, window.innerWidth - bubbleWidth - VIEWPORT_MARGIN),
+    top: clamp(
+      anchorRect.top,
+      VIEWPORT_MARGIN,
+      Math.max(VIEWPORT_MARGIN, window.innerHeight - bubbleHeight - VIEWPORT_MARGIN)
+    ),
+    score: Number.POSITIVE_INFINITY
+  };
+
+  for (const candidate of candidates) {
+    const clamped = clampBubblePosition(candidate.left, candidate.top, bubbleWidth, bubbleHeight);
+    const bubbleRect = buildBubbleRect(clamped.left, clamped.top, bubbleWidth, bubbleHeight);
+    const overlap = intersectionArea(anchorRect, bubbleRect);
+    const displacement = Math.abs(clamped.left - candidate.left) + Math.abs(clamped.top - candidate.top);
+    const score = overlap * 4 + displacement;
+
+    if (score < best.score) {
+      best = {
+        placement: candidate.placement,
+        left: clamped.left,
+        top: clamped.top,
+        score
+      };
+    }
+  }
+
+  if (best.score > 3_500) {
+    const prefersLeftDock = anchorRect.left > window.innerWidth / 2;
+    const dockLeft = prefersLeftDock
+      ? VIEWPORT_MARGIN
+      : Math.max(VIEWPORT_MARGIN, window.innerWidth - bubbleWidth - VIEWPORT_MARGIN);
+
+    return {
+      placement: prefersLeftDock ? 'dock-left' : 'dock-right',
+      left: dockLeft,
+      top: clamp(
+        anchorRect.top,
+        VIEWPORT_MARGIN,
+        Math.max(VIEWPORT_MARGIN, window.innerHeight - bubbleHeight - VIEWPORT_MARGIN)
+      )
+    };
+  }
+
+  return {
+    placement: best.placement,
+    left: best.left,
+    top: best.top
+  };
+}
+
+function ensureHighlightStyle() {
+  if (document.getElementById(HIGHLIGHT_STYLE_ID)) {
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = HIGHLIGHT_CSS;
+  document.head.appendChild(style);
+}
+
+function TestOverlay({ model, onClose }: WorkflowOverlayProps) {
+  return (
+    <div className="mako-overlay-root">
+      <section
+        className="mako-overlay-window"
+        style={{
+          left: Math.max(VIEWPORT_MARGIN, window.innerWidth - 420 - VIEWPORT_MARGIN),
+          top: VIEWPORT_MARGIN
+        }}
+      >
+        <div className="mako-overlay-window__topbar">
+          <div className="mako-overlay-window__headline">
+            <div className="mako-overlay-window__caption">Mako IQ</div>
+            <h2 className="mako-overlay-window__title">Overlay test</h2>
+          </div>
+          <GlassIconButton icon={<Icon name="close" size={15} />} label="Close Mako IQ overlay" onClick={onClose} />
+        </div>
+
+        <div className="mako-overlay-window__section">
+          <div className="mako-overlay-window__section-label">Recommended answer</div>
+          <p className="mako-overlay-window__answer">
+            {sanitizeText(model.fallbackMessage, 'The overlay renderer is responding.')}
+          </p>
+        </div>
+
+        <div className="mako-overlay-window__section">
+          <div className="mako-overlay-window__section-label">Suggested notes</div>
+          <ul className="mako-overlay-window__notes">
+            {(model.fallbackNotes.length ? model.fallbackNotes : ['The floating assistant is rendering inside the page.']).map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OverlayAnswerBubble({
+  activeQuestion,
+  model,
+  position,
+  activeIndex,
+  totalQuestions,
+  onPrevious,
+  onNext,
+  followUpValue,
+  onFollowUpChange,
+  onFollowUpSubmit,
+  isSubmitting,
+  onOpenWorkspace,
+  onPinAssistant,
+  onClose
+}: {
+  activeQuestion: OverlayQuestionViewModel;
+  model: WorkflowOverlayProps['model'];
+  position: OverlayPosition;
+  activeIndex: number;
+  totalQuestions: number;
+  followUpValue: string;
+  onFollowUpChange: (value: string) => void;
+  onFollowUpSubmit: () => void;
+  isSubmitting: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  onOpenWorkspace: () => void;
+  onPinAssistant: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <FloatingPanel
+      animated={false}
+      tone="elevated"
+      className="mako-overlay-bubble"
+      data-placement={position.placement}
+      style={{ left: position.left, top: position.top }}
+      aria-label="Mako IQ mapped answer"
+    >
+      <div className="mako-overlay-bubble__header">
+        <div>
+          <div className="mako-overlay-bubble__eyebrow">Recommended answer</div>
+          <div className="mako-overlay-bubble__meta">
+            {activeIndex + 1} of {totalQuestions} | {model.sourceTitle}
+          </div>
+          <StatusPill label={model.statusLabel} tone={model.statusTone} />
+        </div>
+
+        <div className="mako-overlay-bubble__controls">
+          {totalQuestions > 1 ? (
+            <>
+              <GlassIconButton icon={<Icon name="chevron-left" size={14} />} label="Previous question" onClick={onPrevious} />
+              <GlassIconButton icon={<Icon name="chevron-right" size={14} />} label="Next question" onClick={onNext} />
+            </>
+          ) : null}
+          <GlassIconButton icon={<Icon name="pin" size={14} />} label="Pin assistant window" onClick={onPinAssistant} />
+          <GlassIconButton icon={<Icon name="workspace" size={14} />} label="Open full workspace" onClick={onOpenWorkspace} />
+          <GlassIconButton icon={<Icon name="close" size={14} />} label="Close overlay" onClick={onClose} />
+        </div>
+      </div>
+
+      <p className="mako-overlay-bubble__question">{activeQuestion.question}</p>
+      <p className="mako-overlay-bubble__answer">{activeQuestion.answer}</p>
+
+      <div className="mako-overlay-bubble__notes-block">
+        <div className="mako-overlay-bubble__notes-label">Suggested notes</div>
+        <ul className="mako-overlay-bubble__notes">
+          {activeQuestion.notes.slice(0, 3).map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      </div>
+
+      <FollowUpComposer
+        id="mako-overlay-bubble-followup"
+        className="mako-overlay-bubble__composer"
+        inputClassName="mako-overlay-input"
+        label="Ask another question"
+        value={followUpValue}
+        onChange={onFollowUpChange}
+        onSubmit={onFollowUpSubmit}
+        submitLabel="Ask"
+        disabled={isSubmitting || !followUpValue.trim()}
+        loading={isSubmitting}
+        placeholder={FOLLOW_UP_PLACEHOLDER}
+        footer={undefined}
+      />
+    </FloatingPanel>
+  );
 }
 
 export function CanvyOutputOverlay({ model, onClose }: WorkflowOverlayProps) {
-  const [session, setSession] = useState<AssignmentSessionState | null>(null);
-  const [settings, setSettings] = useState<CanvySettings | null>(null);
-  const [overlayUi, setOverlayUi] = useState<OverlayUiState>(createDefaultOverlayUiState());
-  const [followUp, setFollowUp] = useState('');
-  const [submitPending, setSubmitPending] = useState(false);
-  const [notice, setNotice] = useState('');
-  const windowRef = useRef<HTMLElement | null>(null);
-  const resizePersistTimerRef = useRef<number | null>(null);
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originLeft: number; originTop: number } | null>(null);
   const reducedMotion = useReducedMotionPreference();
+  const [settings, setSettings] = useState<CanvySettings | null>(null);
+  const [uiState, setUiState] = useState<OverlayUiState>(createViewportOverlayUiState());
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [bubblePosition, setBubblePosition] = useState<OverlayPosition>({
+    left: Math.max(VIEWPORT_MARGIN, window.innerWidth - DEFAULT_BUBBLE_WIDTH - VIEWPORT_MARGIN),
+    top: VIEWPORT_MARGIN,
+    placement: 'dock-right'
+  });
+  const [followUpValue, setFollowUpValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [transientStatus, setTransientStatus] = useState('');
+  const bubbleRef = useRef<HTMLElement | null>(null);
+  const windowRef = useRef<HTMLElement | null>(null);
+  const uiStateRef = useRef<OverlayUiState>(uiState);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
+  const resizeStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originWidth: number;
+    originHeight: number;
+  } | null>(null);
+
+  const motionEnabled = (settings?.motionEnabled ?? true) && !reducedMotion;
+  const hasMappedAnswer = model.displayState === 'answer' && model.questions.length > 0;
+  const activeQuestion = model.questions[activeIndex] ?? model.questions[0] ?? null;
+  const windowStatus = transientStatus || model.statusLabel;
+
+  useEffect(() => {
+    uiStateRef.current = uiState;
+  }, [uiState]);
 
   useEffect(() => {
     let mounted = true;
 
     async function hydrate() {
       try {
-        const stored = await chrome.storage.local.get([STORAGE_KEYS.session, STORAGE_KEYS.settings, STORAGE_KEYS.overlayUi]);
+        const stored = await chrome.storage.local.get([STORAGE_KEYS.settings, STORAGE_KEYS.overlayUi]);
         if (!mounted) {
           return;
         }
 
-        setSession((stored[STORAGE_KEYS.session] as AssignmentSessionState | undefined) ?? null);
         setSettings((stored[STORAGE_KEYS.settings] as CanvySettings | undefined) ?? null);
-        setOverlayUi(
-          clampOverlayUi((stored[STORAGE_KEYS.overlayUi] as OverlayUiState | undefined) ?? createDefaultOverlayUiState())
+        setUiState(
+          clampWindowPosition({
+            ...createViewportOverlayUiState(),
+            ...((stored[STORAGE_KEYS.overlayUi] as OverlayUiState | undefined) ?? {})
+          })
         );
       } catch (error) {
         console.error('[Mako IQ overlay] Failed to read overlay state.', error);
@@ -115,120 +430,250 @@ export function CanvyOutputOverlay({ model, onClose }: WorkflowOverlayProps) {
         return;
       }
 
-      if (changes[STORAGE_KEYS.session]) {
-        setSession((changes[STORAGE_KEYS.session].newValue as AssignmentSessionState | undefined) ?? null);
-      }
-
       if (changes[STORAGE_KEYS.settings]) {
         setSettings((changes[STORAGE_KEYS.settings].newValue as CanvySettings | undefined) ?? null);
       }
 
       if (changes[STORAGE_KEYS.overlayUi]) {
-        const next = (changes[STORAGE_KEYS.overlayUi].newValue as OverlayUiState | undefined) ?? createDefaultOverlayUiState();
-        setOverlayUi(clampOverlayUi(next));
+        setUiState(
+          clampWindowPosition({
+            ...createViewportOverlayUiState(),
+            ...((changes[STORAGE_KEYS.overlayUi].newValue as OverlayUiState | undefined) ?? {})
+          })
+        );
       }
-    };
-
-    const onWindowResize = () => {
-      setOverlayUi((current) => clampOverlayUi(current));
     };
 
     void hydrate();
     chrome.storage.onChanged.addListener(onStorageChanged);
-    window.addEventListener('resize', onWindowResize);
 
     return () => {
       mounted = false;
       chrome.storage.onChanged.removeListener(onStorageChanged);
-      window.removeEventListener('resize', onWindowResize);
-      if (resizePersistTimerRef.current) {
-        window.clearTimeout(resizePersistTimerRef.current);
-      }
     };
   }, []);
 
   useEffect(() => {
-    const node = windowRef.current;
-    if (!node || overlayUi.collapsed) {
+    setActiveIndex(0);
+    setTransientStatus('');
+  }, [model.updatedAt]);
+
+  useEffect(() => {
+    if (!model.isTestOverlay && hasMappedAnswer) {
+      ensureHighlightStyle();
+    }
+  }, [hasMappedAnswer, model.isTestOverlay]);
+
+  useEffect(() => {
+    if (model.isTestOverlay || !hasMappedAnswer) {
       return undefined;
     }
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
+    const elements = Array.from(
+      new Set(
+        model.questions
+          .map((question) => findAnchorElement(question.sourceAnchor))
+          .filter((element): element is HTMLElement => Boolean(element))
+      )
+    );
+    const activeElement = activeQuestion ? findAnchorElement(activeQuestion.sourceAnchor) : null;
 
-      const width = Math.round(entry.contentRect.width);
-      const height = Math.round(entry.contentRect.height);
-
-      if (Math.abs(width - overlayUi.width) < 2 && Math.abs(height - overlayUi.height) < 2) {
-        return;
-      }
-
-      setOverlayUi((current) => {
-        const next = clampOverlayUi({
-          ...current,
-          width,
-          height
-        });
-
-        if (resizePersistTimerRef.current) {
-          window.clearTimeout(resizePersistTimerRef.current);
-        }
-
-        resizePersistTimerRef.current = window.setTimeout(() => {
-          void persistOverlayUiState(next);
-        }, 120);
-
-        return next;
-      });
-    });
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [overlayUi.collapsed, overlayUi.height, overlayUi.width]);
-
-  const sessionMatchesPage = useMemo(() => {
-    if (!session) {
-      return false;
+    for (const element of elements) {
+      element.classList.add(HIGHLIGHT_CLASS);
     }
 
-    return matchesCurrentPage(
-      session.pageState.currentPage.url ?? session.pageContext?.url ?? session.lastAnalysis?.sourceUrl,
-      model.sourceUrl
-    );
-  }, [model.sourceUrl, session]);
+    activeElement?.classList.add(HIGHLIGHT_ACTIVE_CLASS);
 
-  const liveAnalysis = sessionMatchesPage ? session?.pageState.analysis ?? session?.lastAnalysis ?? null : null;
-  const analysisRun = sessionMatchesPage ? session?.analysisRun ?? null : null;
-  const isRunning = Boolean(
-    analysisRun &&
-      analysisRun.phase !== 'completed' &&
-      analysisRun.phase !== 'error' &&
-      analysisRun.phase !== 'cancelled'
-  );
-  const motionEnabled = settings?.motionEnabled ?? true;
-  const derivedAnswer = isRunning
-    ? sanitizeText(analysisRun?.partialText, sanitizeText(analysisRun?.statusLabel, model.answer))
-    : sanitizeText(liveAnalysis?.text, model.answer);
-  const derivedNotes = isRunning ? [] : sanitizeNotes(liveAnalysis?.bullets?.length ? liveAnalysis.bullets : model.notes);
-  const statusMessage =
-    notice ||
-    (analysisRun?.error ? analysisRun.error : isRunning ? sanitizeText(analysisRun?.statusLabel, 'Scanning...') : '');
-  const revealedAnswer = useDripReveal(derivedAnswer, Boolean(isRunning && motionEnabled && derivedAnswer));
-  const showCaret = Boolean(isRunning && derivedAnswer && !revealedAnswer.reducedMotion && motionEnabled);
+    return () => {
+      for (const element of elements) {
+        element.classList.remove(HIGHLIGHT_CLASS);
+        element.classList.remove(HIGHLIGHT_ACTIVE_CLASS);
+      }
+    };
+  }, [activeQuestion, hasMappedAnswer, model.isTestOverlay, model.questions]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const instruction = sanitizeText(formData.get('followUp')?.toString(), followUp).trim();
-    if (!instruction || submitPending) {
+  useEffect(() => {
+    const onResize = () => {
+      setUiState((current) => clampWindowPosition(current));
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (model.isTestOverlay || !hasMappedAnswer || !activeQuestion) {
+      return undefined;
+    }
+
+    const anchor = findAnchorElement(activeQuestion.sourceAnchor);
+    const bubble = bubbleRef.current;
+
+    if (!anchor || !bubble) {
+      return undefined;
+    }
+
+    let resizeObserver: ResizeObserver | null = null;
+
+    const updatePosition = () => {
+      const currentAnchor = findAnchorElement(activeQuestion.sourceAnchor);
+      const currentBubble = bubbleRef.current;
+      if (!currentAnchor || !currentBubble) {
+        return;
+      }
+
+      const anchorRect = currentAnchor.getBoundingClientRect();
+      const bubbleWidth = Math.max(DEFAULT_BUBBLE_WIDTH, currentBubble.offsetWidth || 0);
+      const bubbleHeight = Math.max(DEFAULT_BUBBLE_HEIGHT, currentBubble.offsetHeight || 0);
+      setBubblePosition(computeAnchoredPosition(anchorRect, bubbleWidth, bubbleHeight));
+    };
+
+    updatePosition();
+    const rafId = window.requestAnimationFrame(updatePosition);
+    const onViewportChange = () => updatePosition();
+
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('scroll', onViewportChange, true);
+    resizeObserver = new ResizeObserver(() => updatePosition());
+    resizeObserver.observe(bubble);
+    resizeObserver.observe(anchor);
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onViewportChange);
+      window.removeEventListener('scroll', onViewportChange, true);
+      resizeObserver?.disconnect();
+    };
+  }, [activeQuestion, hasMappedAnswer, model.isTestOverlay]);
+
+  async function persistOverlayUi(nextState: OverlayUiState) {
+    try {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.overlayUi]: nextState
+      });
+    } catch (error) {
+      console.error('[Mako IQ overlay] Failed to persist overlay position.', error);
+    }
+  }
+
+  function handleWindowPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || uiState.collapsed || isInteractivePointerTarget(event.target)) {
       return;
     }
 
-    setSubmitPending(true);
-    setNotice('');
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: uiState.left,
+      originTop: uiState.top
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleWindowPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const nextState = clampWindowPosition({
+      ...uiStateRef.current,
+      left: drag.originLeft + (event.clientX - drag.startX),
+      top: drag.originTop + (event.clientY - drag.startY)
+    });
+    setUiState(nextState);
+  }
+
+  function handleWindowPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    dragStateRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    void persistOverlayUi(uiStateRef.current);
+  }
+
+  function handleResizePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || uiState.collapsed) {
+      return;
+    }
+
+    event.stopPropagation();
+    resizeStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originWidth: uiState.width,
+      originHeight: uiState.height
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleResizePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const resize = resizeStateRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const nextState = clampWindowPosition({
+      ...uiStateRef.current,
+      width: resize.originWidth + (event.clientX - resize.startX),
+      height: resize.originHeight + (event.clientY - resize.startY)
+    });
+    setUiState(nextState);
+  }
+
+  function handleResizePointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
+    const resize = resizeStateRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    resizeStateRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    void persistOverlayUi(uiStateRef.current);
+  }
+
+  function handleToggleCollapsed() {
+    const nextState = clampWindowPosition({
+      ...uiStateRef.current,
+      collapsed: !uiStateRef.current.collapsed
+    });
+    setUiState(nextState);
+    void persistOverlayUi(nextState);
+  }
+
+  function handlePinAssistant() {
+    const nextState = clampWindowPosition({
+      ...uiStateRef.current,
+      collapsed: false
+    });
+    setUiState(nextState);
+    void persistOverlayUi(nextState);
+  }
+
+  async function handleOpenWorkspace() {
+    try {
+      await sendRuntimeMessage({
+        type: 'OPEN_SIDEPANEL',
+        requestId: createRequestId()
+      });
+    } catch (error) {
+      setTransientStatus(sanitizeText(error instanceof Error ? error.message : 'Could not open the workspace.'));
+    }
+  }
+
+  async function handleFollowUpSubmit() {
+    const instruction = followUpValue.trim();
+    if (!instruction) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setTransientStatus('Working on a fresh answer...');
 
     try {
       const response = await sendRuntimeMessage<StartAnalysisResponse>({
@@ -238,189 +683,161 @@ export function CanvyOutputOverlay({ model, onClose }: WorkflowOverlayProps) {
       });
 
       if (!response.ok) {
-        setNotice(response.error ?? response.message ?? 'Could not start the follow-up.');
+        setTransientStatus(response.error ?? response.message ?? 'Could not start the follow-up.');
         return;
       }
 
-      setFollowUp('');
+      setFollowUpValue('');
     } catch (error) {
-      console.error('[Mako IQ overlay] Follow-up submit failed.', error);
-      setNotice('Could not start the follow-up.');
+      setTransientStatus(sanitizeText(error instanceof Error ? error.message : 'Could not start the follow-up.'));
     } finally {
-      setSubmitPending(false);
+      setIsSubmitting(false);
     }
   }
 
-  async function handleCancel() {
-    setSubmitPending(true);
-
-    try {
-      const response = await sendRuntimeMessage<CancelAnalysisResponse>({
-        type: 'CANVY_CANCEL_ANALYSIS',
-        requestId: createRequestId()
-      });
-      setNotice(response.message);
-    } catch (error) {
-      console.error('[Mako IQ overlay] Cancel request failed.', error);
-      setNotice('Could not cancel the current answer.');
-    } finally {
-      setSubmitPending(false);
-    }
+  if (model.isTestOverlay) {
+    return <TestOverlay model={model} onClose={onClose} />;
   }
-
-  async function handleToggleCollapsed() {
-    const next = clampOverlayUi({
-      ...overlayUi,
-      collapsed: !overlayUi.collapsed
-    });
-    setOverlayUi(next);
-    await persistOverlayUiState(next);
-  }
-
-  function handleDragStart(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originLeft: overlayUi.left,
-      originTop: overlayUi.top
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  async function commitDraggedPosition(next: OverlayUiState) {
-    const clamped = clampOverlayUi(next);
-    setOverlayUi(clamped);
-    await persistOverlayUiState(clamped);
-  }
-
-  function handleDragMove(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const next = clampOverlayUi({
-      ...overlayUi,
-      left: drag.originLeft + (event.clientX - drag.startX),
-      top: drag.originTop + (event.clientY - drag.startY)
-    });
-    setOverlayUi(next);
-  }
-
-  function handleDragEnd(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const next = clampOverlayUi({
-      ...overlayUi,
-      left: drag.originLeft + (event.clientX - drag.startX),
-      top: drag.originTop + (event.clientY - drag.startY)
-    });
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    void commitDraggedPosition(next);
-  }
-
-  const hasErrorNotice = Boolean(analysisRun?.error || /could not/i.test(notice));
 
   return (
-    <MotionProvider>
-      <div className="mako-overlay-root" aria-live="polite">
-        <m.section
-          ref={windowRef}
-          className={`mako-overlay-window ${overlayUi.collapsed ? 'mako-overlay-window--collapsed' : ''}`}
-          style={{
-            left: overlayUi.left,
-            top: overlayUi.top,
-            width: overlayUi.width,
-            height: overlayUi.collapsed ? undefined : overlayUi.height
-          }}
-          initial={motionEnabled && !reducedMotion ? { opacity: 0, scale: 0.96, y: 12 } : false}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: [0.2, 0.9, 0.24, 1] }}
-          aria-label="Mako IQ page answer"
-        >
-          <div className="mako-overlay-window__topbar">
-            <div
-              className="mako-overlay-window__drag mako-overlay-window__headline"
-              onPointerDown={handleDragStart}
-              onPointerMove={handleDragMove}
-              onPointerUp={handleDragEnd}
-              onPointerCancel={handleDragEnd}
-            >
-              <div className="mako-overlay-window__caption">Recommended answer</div>
-              <h2 className="mako-overlay-window__title">{sanitizeText(model.sourceTitle, 'Current page')}</h2>
-            </div>
+    <div className={`mako-overlay-root ${motionEnabled ? '' : 'mako-app--no-motion'}`} aria-live="polite">
+      {hasMappedAnswer && activeQuestion ? (
+        <OverlayAnswerBubble
+          activeQuestion={activeQuestion}
+          model={model}
+          position={bubblePosition}
+          activeIndex={activeIndex}
+          totalQuestions={model.questions.length}
+          onPrevious={() =>
+            setActiveIndex((current) => (current - 1 + model.questions.length) % model.questions.length)
+          }
+          onNext={() => setActiveIndex((current) => (current + 1) % model.questions.length)}
+          followUpValue={followUpValue}
+          onFollowUpChange={setFollowUpValue}
+          onFollowUpSubmit={() => void handleFollowUpSubmit()}
+          isSubmitting={isSubmitting}
+          onOpenWorkspace={() => void handleOpenWorkspace()}
+          onPinAssistant={handlePinAssistant}
+          onClose={onClose}
+        />
+      ) : null}
 
-            <div className="mako-actions-row">
-              <StatusPill label={isRunning ? 'Live' : 'Page'} tone={isRunning ? 'accent' : 'neutral'} />
-              <IconButton
-                icon={overlayUi.collapsed ? '+' : '-'}
-                label={overlayUi.collapsed ? 'Expand overlay' : 'Collapse overlay'}
-                onClick={() => void handleToggleCollapsed()}
-              />
-              <IconButton icon="x" label="Close Mako IQ overlay" onClick={onClose} />
+      <section
+        ref={windowRef}
+        className={`mako-overlay-window ${uiState.collapsed ? 'mako-overlay-window--collapsed' : ''}`}
+        style={{
+          left: uiState.left,
+          top: uiState.top,
+          width: uiState.width,
+          height: uiState.collapsed ? undefined : uiState.height
+        }}
+      >
+        <div
+          className="mako-overlay-window__topbar mako-overlay-window__drag"
+          onPointerDown={handleWindowPointerDown}
+          onPointerMove={handleWindowPointerMove}
+          onPointerUp={handleWindowPointerUp}
+          onPointerCancel={handleWindowPointerUp}
+        >
+          <div className="mako-overlay-window__headline">
+            <div className="mako-overlay-window__caption">Mako IQ assistant</div>
+            <h2 className="mako-overlay-window__title">
+              {hasMappedAnswer && activeQuestion ? activeQuestion.question : model.fallbackTitle}
+            </h2>
+            <div className="mako-overlay-window__status-row">
+              <StatusPill label={windowStatus} tone={model.statusTone} />
+              {model.sourceTitle ? <span className="mako-overlay-window__source">{model.sourceTitle}</span> : null}
             </div>
           </div>
 
-          {statusMessage ? (
-            <p className={`mako-overlay-window__status ${hasErrorNotice ? 'mako-overlay-window__status--danger' : ''}`}>
-              {statusMessage}
+          <div className="mako-overlay-window__controls">
+            <GlassIconButton
+              icon={<Icon name="workspace" size={15} />}
+              label="Open full workspace"
+              onClick={() => void handleOpenWorkspace()}
+            />
+            <GlassIconButton
+              icon={<Icon name="minimize" size={15} />}
+              label={uiState.collapsed ? 'Expand assistant' : 'Minimize assistant'}
+              onClick={handleToggleCollapsed}
+            />
+            <GlassIconButton icon={<Icon name="close" size={15} />} label="Close assistant" onClick={onClose} />
+          </div>
+        </div>
+
+        <div className="mako-overlay-window__body">
+          {transientStatus && !isSubmitting ? <InlineNotice tone="warning">{transientStatus}</InlineNotice> : null}
+
+          <div className="mako-overlay-window__section">
+            <div className="mako-overlay-window__section-label">Recommended answer</div>
+            <p className="mako-overlay-window__answer">
+              {hasMappedAnswer && activeQuestion ? activeQuestion.answer : model.fallbackMessage}
             </p>
+          </div>
+
+          <div className="mako-overlay-window__section">
+            <div className="mako-overlay-window__section-label">Suggested notes</div>
+            <ul className="mako-overlay-window__notes">
+              {(hasMappedAnswer && activeQuestion ? activeQuestion.notes : model.fallbackNotes).map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          </div>
+
+          {hasMappedAnswer && model.questions.length > 1 ? (
+            <div className="mako-overlay-window__chips" aria-label="Mapped questions">
+              {model.questions.map((question, index) => (
+                <button
+                  key={question.id}
+                  type="button"
+                  className={`mako-overlay-window__chip ${index === activeIndex ? 'mako-overlay-window__chip--active' : ''}`}
+                  onClick={() => setActiveIndex(index)}
+                >
+                  Q{index + 1}
+                </button>
+              ))}
+            </div>
           ) : null}
 
-          <div className="mako-overlay-window__body">
-            <p className="mako-overlay-window__answer">
-              {revealedAnswer.displayed}
-              {showCaret ? <span className="mako-typing-caret" aria-hidden="true" /> : null}
-            </p>
-
-            {derivedNotes.length ? (
-              <div className="mako-stack">
-                <div className="mako-eyebrow">Suggested notes</div>
-                <ul className="mako-overlay-window__notes">
-                  {derivedNotes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            <form className="mako-overlay-window__composer" onSubmit={handleSubmit}>
-              <input
-                className="mako-overlay-input"
-                name="followUp"
-                type="text"
-                value={followUp}
-                onChange={(event) => setFollowUp(event.target.value)}
-                placeholder="Ask a follow-up..."
-                aria-label="Ask a follow-up"
-              />
+          <FollowUpComposer
+            id="mako-overlay-followup"
+            className="mako-overlay-window__composer"
+            inputClassName="mako-overlay-input"
+            label="Ask another question"
+            value={followUpValue}
+            onChange={setFollowUpValue}
+            onSubmit={() => void handleFollowUpSubmit()}
+            submitLabel={isSubmitting ? 'Working...' : 'Ask'}
+            disabled={isSubmitting || !followUpValue.trim()}
+            loading={isSubmitting}
+            placeholder={FOLLOW_UP_PLACEHOLDER}
+            footer={
               <div className="mako-overlay-window__actions">
-                <GlassButton type="submit" variant="primary" disabled={submitPending || !followUp.trim()}>
-                  Ask
-                </GlassButton>
-                {isRunning ? (
-                  <GlassButton type="button" variant="secondary" onClick={() => void handleCancel()} disabled={submitPending}>
-                    Cancel
-                  </GlassButton>
-                ) : null}
+                <GhostButton
+                  size="sm"
+                  onClick={() => void handleOpenWorkspace()}
+                  leadingIcon={<Icon name="workspace" size={14} />}
+                >
+                  Open workspace
+                </GhostButton>
               </div>
-            </form>
-          </div>
+            }
+          />
+        </div>
 
-          <div className="mako-overlay-window__meta">
-            Drag from the header. Resize from the corner. Mako IQ keeps this layout for later pages.
-          </div>
-        </m.section>
-      </div>
-    </MotionProvider>
+        {!uiState.collapsed ? (
+          <button
+            type="button"
+            className="mako-overlay-window__resize"
+            aria-label="Resize assistant"
+            title="Resize assistant"
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerUp}
+            onPointerCancel={handleResizePointerUp}
+          />
+        ) : null}
+      </section>
+    </div>
   );
 }

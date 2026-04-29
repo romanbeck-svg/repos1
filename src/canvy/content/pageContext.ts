@@ -1,6 +1,6 @@
 import { detectPageType } from '../shared/lms';
 import type { PageContextSummary } from '../shared/types';
-import { cleanExtractedText, extractReadableContent } from './extraction';
+import { cleanExtractedText, extractQuestionCandidates, extractReadableContent } from './extraction';
 
 function createContentFingerprint(parts: string[]) {
   let hash = 0;
@@ -17,6 +17,7 @@ function createContentFingerprint(parts: string[]) {
 export function extractPageContext(): PageContextSummary {
   const pageType = detectPageType(window.location.href);
   const readableContent = extractReadableContent(pageType);
+  const questionCandidates = extractQuestionCandidates(pageType);
   const previewText = readableContent.previewText || 'Readable page text is limited on this tab.';
   const priorityText = [readableContent.headings.join('\n'), readableContent.blocks.slice(0, 8).join('\n\n')]
     .filter(Boolean)
@@ -30,6 +31,8 @@ export function extractPageContext(): PageContextSummary {
     domain: window.location.hostname.replace(/^www\./i, ''),
     pageType,
     headings: readableContent.headings,
+    contentBlocks: readableContent.blocks.slice(0, 24),
+    questionCandidates,
     previewText,
     priorityText,
     textLength: readableContent.readableText.length || previewText.length,

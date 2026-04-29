@@ -1,0 +1,58 @@
+{
+  "name": "mako-iq-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "description": "Local desktop companion app for Mako IQ.",
+  "scripts": {
+    "dev": "electron .",
+    "build": "node scripts/verify-companion.mjs",
+    "package": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.makoiq.companion",
+    "productName": "Mako IQ Companion",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../backend/dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "../../backend/package.json",
+        "to": "backend/package.json"
+      },
+      {
+        "from": "../../backend/.env",
+        "to": "backend/.env"
+      },
+      {
+        "from": "../../backend/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
+        "from": "../../public/icons",
+        "to": "public/icons"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

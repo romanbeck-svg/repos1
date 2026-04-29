@@ -1,4 +1,4 @@
-import type { PageSurfaceType } from '../shared/types';
+import type { AnalysisQuestionCandidate, PageSurfaceType } from '../shared/types';
 
 const CONTENT_ROOT_SELECTORS = [
   'article',
@@ -130,12 +130,204 @@ const NOISE_PHRASES = [
   'language'
 ];
 
+const QUESTION_PROMPT_PATTERN =
+  /^(?:\d+[\.\)]\s+|[A-Z][\.\)]\s+)?(?:what|why|how|when|where|which|who|explain|describe|solve|complete|identify|compare|list|define|discuss|calculate|find|determine|write|choose|select|state|summarize|analyze)\b/i;
+const QUESTION_SIGNAL_PATTERN = /\?$|^(?:\d+[\.\)]\s+|[A-Z][\.\)]\s+)/;
+const QUESTION_CONTEXT_PATTERN = /\b(question|prompt|task|worksheet|assignment|response|answer|discussion)\b/i;
+const QUESTION_ANCHOR_ATTRIBUTE = 'data-mako-question-anchor';
+
 function normalizeWhitespace(value: string | null | undefined) {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeForDedup(value: string) {
   return normalizeWhitespace(value).toLowerCase();
+}
+
+function buildSelectorHint(element: Element) {
+  const classes = Array.from(element.classList).slice(0, 3).join('.');
+  const id = element.id ? `#${element.id}` : '';
+  const tag = element.tagName.toLowerCase();
+  return `${tag}${id}${classes ? `.${classes}` : ''}`.slice(0, 160);
+}
+
+function isVisibleElement(element: Element) {
+  const htmlElement = element as HTMLElement;
+  if (htmlElement.hidden || htmlElement.getAttribute('aria-hidden') === 'true') {
+    return false;
+  }
+
+  const rect = htmlElement.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function labelQuestionAnchor(element: Element) {
+  const existing = element.getAttribute(QUESTION_ANCHOR_ATTRIBUTE);
+  if (existing) {
+    return existing;
+  }
+
+  const next = `mako-question-${crypto.randomUUID().slice(0, 8)}`;
+  element.setAttribute(QUESTION_ANCHOR_ATTRIBUTE, next);
+  return next;
+}
+
+function firstSentence(value: string) {
+  return normalizeWhitespace(value.split(/(?<=[.!?])\s+/)[0] ?? value);
+}
+
+function trimForQuestion(value: string, maxLength = 260) {
+  const clean = normalizeWhitespace(value);
+  if (!clean) {
+    return '';
+  }
+
+  return clean.length > maxLength ? `${clean.slice(0, maxLength - 1).trimEnd()}...` : clean;
+}
+
+function pickQuestionText(value: string) {
+  const lines = value
+    .split(/\n+/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
+  const directLine =
+    lines.find((line) => QUESTION_SIGNAL_PATTERN.test(line) || QUESTION_PROMPT_PATTERN.test(line)) ??
+    lines.find((line) => line.length >= 16);
+
+  return trimForQuestion(firstSentence(directLine ?? value));
+}
+
+function findNearbyHeading(element: Element, root: Element | HTMLElement) {
+  const sectionHeading =
+    element.closest('section, article, form, fieldset, table, main')?.querySelector('h1, h2, h3, h4, legend') ??
+    undefined;
+  const previousHeading = (() => {
+    let current: Element | null = element.previousElementSibling;
+    while (current) {
+      if (current.matches('h1, h2, h3, h4, legend')) {
+        return current;
+      }
+      current = current.previousElementSibling;
+    }
+    return null;
+  })();
+  const rootHeading = root.querySelector('h1, h2, h3');
+
+  return trimForQuestion(
+    normalizeWhitespace(sectionHeading?.textContent) ||
+      normalizeWhitespace(previousHeading?.textContent) ||
+      normalizeWhitespace(rootHeading?.textContent),
+    120
+  );
+}
+
+function collectNearbyText(element: Element, questionText: string) {
+  const candidates = [
+    normalizeWhitespace(element.previousElementSibling?.textContent),
+    normalizeWhitespace(element.nextElementSibling?.textContent),
+    normalizeWhitespace(element.parentElement?.previousElementSibling?.textContent),
+    normalizeWhitespace(element.parentElement?.nextElementSibling?.textContent)
+  ];
+
+  return uniqueCleanText(
+    candidates.filter((value) => value && normalizeForDedup(value) !== normalizeForDedup(questionText)),
+    4
+  ).map((value) => trimForQuestion(value, 200));
+}
+
+function collectAnswerChoices(element: Element, questionText: string) {
+  const container =
+    element.closest('.quiz_question, .question, fieldset, form, article, section, table') ?? element.parentElement;
+
+  if (!container) {
+    return [];
+  }
+
+  const choices = uniqueCleanText(
+    Array.from(container.querySelectorAll('li, label, .answer, .choice, [role="option"], [role="radio"]'))
+      .map((node) => normalizeWhitespace(node.textContent))
+      .filter(
+        (text) =>
+          text &&
+          text.length >= 1 &&
+          text.length <= 140 &&
+          normalizeForDedup(text) !== normalizeForDedup(questionText) &&
+          !looksLikeUiLabel(text)
+      ),
+    6
+  );
+
+  return choices.length >= 2 ? choices : [];
+}
+
+function scoreQuestionCandidate(questionText: string, sectionLabel: string, answerChoices: string[], nearbyText: string[]) {
+  let score = 0;
+
+  if (/\?$/.test(questionText)) {
+    score += 4;
+  }
+
+  if (QUESTION_PROMPT_PATTERN.test(questionText)) {
+    score += 3;
+  }
+
+  if (QUESTION_SIGNAL_PATTERN.test(questionText)) {
+    score += 2;
+  }
+
+  if (answerChoices.length) {
+    score += 1;
+  }
+
+  if (sectionLabel && QUESTION_CONTEXT_PATTERN.test(sectionLabel)) {
+    score += 1;
+  }
+
+  if (nearbyText.some((value) => QUESTION_CONTEXT_PATTERN.test(value))) {
+    score += 1;
+  }
+
+  if (questionText.length >= 18 && questionText.length <= 260) {
+    score += 1;
+  }
+
+  if (questionText.length > 340) {
+    score -= 3;
+  }
+
+  return score;
+}
+
+function collectQuestionElements(root: Element | HTMLElement, pageType: PageSurfaceType) {
+  const strongSelectors = [
+    '.question_text',
+    '.quiz_question',
+    '.ic-QuizQuestion',
+    '.assignment-description',
+    '.discussion-topic',
+    '.discussion_topic',
+    '[data-testid*="question"]',
+    '[aria-label*="question" i]',
+    '[role="radiogroup"]'
+  ];
+  const baseSelectors =
+    pageType === 'docs'
+      ? ['.kix-page-content-wrapper .kix-paragraphrenderer', '.kix-page-content-wrapper .kix-lineview']
+      : ['h1', 'h2', 'h3', 'h4', 'p', 'li', 'label', 'legend', 'blockquote', 'td'];
+
+  const allSelectors = [...strongSelectors, ...baseSelectors].join(', ');
+
+  return Array.from(root.querySelectorAll(allSelectors)).filter((element, index, array) => {
+    if (array.indexOf(element) !== index) {
+      return false;
+    }
+
+    if (!isVisibleElement(element)) {
+      return false;
+    }
+
+    return !element.closest(UI_PRUNE_SELECTORS);
+  });
 }
 
 export function uniqueCleanText(items: string[], limit: number) {
@@ -380,4 +572,50 @@ export function extractReadableContent(pageType: PageSurfaceType): ExtractedRead
     previewText: buildPreviewText(headings, fallbackBlocks, 1600),
     notes: ['Prioritized main content containers and reduced likely interface chrome.']
   };
+}
+
+export function extractQuestionCandidates(pageType: PageSurfaceType, limit = 10): AnalysisQuestionCandidate[] {
+  const root = pickReadableRoot(pageType);
+  const candidates = collectQuestionElements(root as Element, pageType);
+  const seen = new Set<string>();
+  const results: AnalysisQuestionCandidate[] = [];
+
+  for (const element of candidates) {
+    const rawText = normalizeWhitespace(element.textContent);
+    if (!rawText || rawText.length < 12 || looksLikeUiLabel(rawText)) {
+      continue;
+    }
+
+    const question = pickQuestionText(rawText);
+    if (!question || question.length < 12) {
+      continue;
+    }
+
+    const sectionLabel = findNearbyHeading(element, root as Element);
+    const nearbyText = collectNearbyText(element, question);
+    const answerChoices = collectAnswerChoices(element, question);
+    const score = scoreQuestionCandidate(question, sectionLabel, answerChoices, nearbyText);
+    const dedupeKey = normalizeForDedup(question);
+
+    if (score < 4 || seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    results.push({
+      id: `q${results.length + 1}`,
+      question,
+      sectionLabel: sectionLabel || undefined,
+      nearbyText,
+      answerChoices,
+      sourceAnchor: labelQuestionAnchor(element),
+      selectorHint: buildSelectorHint(element)
+    });
+
+    if (results.length >= limit) {
+      break;
+    }
+  }
+
+  return results;
 }

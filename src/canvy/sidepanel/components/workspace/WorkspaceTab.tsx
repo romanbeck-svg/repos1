@@ -64,12 +64,12 @@ export function WorkspaceTab({
       {!configured ? (
         <section className="canvy-card">
           <div className="canvy-eyebrow">Configure</div>
-          <h3>Hey there, I&apos;m Canvy, your page-aware assistant.</h3>
+          <h3>Hey there, I&apos;m Mako IQ, your page-aware assistant.</h3>
           <p>
-            I&apos;m going to read over your past work so I can understand your writing tone, style, and structure. Scan a page first, then run setup so Canvy can calibrate your workflow output.
+            I&apos;m going to read over your past work so I can understand your writing tone, style, and structure. Scan a page first, then run setup so Mako IQ can calibrate your workflow output.
           </p>
           <button className="canvy-primary" type="button" onClick={onConfigure} disabled={busy}>
-            {busy ? 'Configuring...' : 'Configure Canvy'}
+            {busy ? 'Configuring...' : 'Configure Mako IQ'}
           </button>
         </section>
       ) : null}
@@ -110,7 +110,7 @@ export function WorkspaceTab({
               key={message.id}
               className={`canvy-message ${message.role === 'assistant' ? 'canvy-message-assistant' : 'canvy-message-user'}`}
             >
-              <div className="canvy-eyebrow">{message.role === 'assistant' ? 'Canvy' : 'You'}</div>
+              <div className="canvy-eyebrow">{message.role === 'assistant' ? 'Mako IQ' : 'You'}</div>
               <p>{message.text}</p>
             </div>
           ))}

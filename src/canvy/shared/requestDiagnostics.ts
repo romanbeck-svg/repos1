@@ -95,6 +95,30 @@ function withRequestId(message: string, requestId?: string) {
   return requestId ? `${message} (req ${requestId})` : message;
 }
 
+function mapLocalAiMessage(message: string) {
+  if (/MOONSHOT_API_KEY is missing|Kimi API key is missing/i.test(message)) {
+    return 'Kimi API key is missing in the local backend. Add MOONSHOT_API_KEY to backend/.env or configure it in Mako IQ Companion.';
+  }
+
+  if (/Kimi rejected the API key/i.test(message)) {
+    return 'Kimi rejected the API key. Check MOONSHOT_API_KEY in backend/.env.';
+  }
+
+  if (/Kimi API request failed|Kimi .*failed|Moonshot .*failed/i.test(message)) {
+    return 'Mako IQ reached the local backend, but Kimi failed to respond. Check the Companion app status.';
+  }
+
+  if (/selected ollama model is not installed|selected local model is not installed/i.test(message)) {
+    return 'Selected local model is not installed. Open Mako IQ Companion and install the model.';
+  }
+
+  if (/local ai model is not running|could not reach ollama|ollama request/i.test(message)) {
+    return 'Local AI model is not running. Open Ollama or check Mako IQ Companion.';
+  }
+
+  return message;
+}
+
 export function logTrace(tag: string, payload: Record<string, unknown> = {}) {
   console.info(`[Mako IQ][${tag}]`, payload);
 }
@@ -136,12 +160,9 @@ export function createNetworkRequestError(meta: RequestTraceMeta, error: unknown
     category = 'message_channel_closed';
     message = 'Message channel closed before the extension responded.';
   } else if (/Failed to fetch|NetworkError|Load failed|fetch failed|ECONNREFUSED|ENOTFOUND/i.test(originalMessage)) {
-    if (meta.apiBaseUrlSource === 'default' && isLoopback) {
-      category = 'wrong_api_url';
-      message = `Wrong API URL. The extension is still using the default local backend ${origin ?? meta.url ?? ''}.`.trim();
-    } else if (isLoopback) {
+    if (isLoopback) {
       category = 'backend_offline';
-      message = `Backend offline. Could not reach ${origin ?? meta.url ?? 'the local backend'}.`;
+      message = 'Mako IQ Local Server is not running. Open Mako IQ Companion and try again.';
     } else {
       category = 'wrong_api_url';
       message = `Wrong API URL. Could not reach ${origin ?? meta.url ?? 'the configured backend'}.`;
@@ -174,9 +195,9 @@ export function createHttpRequestError(
   options: { routeLabel?: string; parsedError?: string } = {}
 ) {
   const routeLabel = options.routeLabel ?? 'Request';
-  const parsedError = options.parsedError?.trim() || '';
+  const parsedError = mapLocalAiMessage(options.parsedError?.trim() || '');
   const summary = `${routeLabel} returned HTTP ${status}.`;
-  const message = parsedError ? `${summary} ${parsedError}` : summary;
+  const message = parsedError || summary;
   const detail = [
     `context=${meta.context}`,
     `source=${meta.source ?? 'unknown'}`,

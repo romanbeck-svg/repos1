@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const DEFAULT_TARGET_URL = new URL(process.env.CANVY_SMOKE_URL ?? 'https://example.com/').href;
 const DEFAULT_API_BASE_URL = (process.env.CANVY_SMOKE_API_BASE_URL ?? 'http://localhost:8787').replace(/\/+$/, '');
-const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.CANVY_SMOKE_PORT ?? 9230);
+const DEFAULT_REMOTE_DEBUGGING_PORT = Number(process.env.CANVY_SMOKE_PORT ?? 9230 + Math.floor(Math.random() * 200));
 const DEFAULT_STEP_TIMEOUT_MS = 30_000;
 const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 const KEEP_BROWSER_OPEN = process.env.CANVY_SMOKE_KEEP_BROWSER === '1';
@@ -281,13 +281,14 @@ async function sendRuntimeMessage(send, readContentContextId, message, timeoutMs
   return evaluateInContext(send, readContentContextId, 'the extension content-script context', expression);
 }
 
-async function readOverlay(send, readMainContextId) {
+async function readOverlay(send, readContentContextId) {
   return evaluateInContext(
     send,
-    readMainContextId,
-    'the main page execution context',
+    readContentContextId,
+    'the extension content-script context',
     `(() => {
       const host = document.getElementById('canvy-output-overlay-host');
+      const mount = host?.shadowRoot?.querySelector('[data-canvy-overlay-root]');
       const shell = host?.shadowRoot?.querySelector('.mako-overlay-window');
       const shellText = shell?.innerText?.replace(/\\s+/g, ' ').trim() ?? '';
       const normalizedText = shellText.toLowerCase();
@@ -295,10 +296,14 @@ async function readOverlay(send, readMainContextId) {
       return {
         hasHost: Boolean(host),
         hasShadowRoot: Boolean(host?.shadowRoot),
+        hasMount: Boolean(mount),
+        hasShell: Boolean(shell),
         hasRecommendedAnswer: normalizedText.includes('recommended answer'),
         hasSuggestedNotes: normalizedText.includes('suggested notes'),
         followUpPlaceholder: followUpInput?.getAttribute('placeholder') ?? '',
-        textPreview: shellText.slice(0, 320) ?? ''
+        textPreview: shellText.slice(0, 320) ?? '',
+        mountPreview: mount?.innerHTML?.slice(0, 600) ?? '',
+        shadowPreview: host?.shadowRoot?.innerHTML?.slice(0, 600) ?? ''
       };
     })()`
   );
@@ -483,9 +488,9 @@ async function main() {
         diagnostics[diagnostics.length - 1];
       const checks = [
         summarizeCheck(
-          'manifest keeps default action popup',
-          manifest?.action?.default_popup === 'launcher.html',
-          manifest?.action?.default_popup ?? 'none'
+          'manifest action opens workspace sidebar',
+          !manifest?.action?.default_popup && manifest?.side_panel?.default_path === 'sidepanel.html',
+          `popup=${manifest?.action?.default_popup ?? 'none'} sidePanel=${manifest?.side_panel?.default_path ?? 'none'}`
         ),
         summarizeCheck(
           'launcher bundle opens workspace directly',
@@ -498,19 +503,19 @@ async function main() {
           'launcher bundle runtime message path'
         ),
         summarizeCheck(
-          'background keeps popup-first action behavior',
-          backgroundBundle.includes('launcher.html') &&
+          'background keeps workspace-first action behavior',
+          backgroundBundle.includes('sidePanel.open') &&
             backgroundBundle.includes('openPanelOnActionClick') &&
             backgroundBundle.includes('setPopup'),
-          'background popup-first wiring'
+          'background workspace-first wiring'
         ),
         summarizeCheck('content bridge initialized', contentInitialized === true, session.extensionId),
         summarizeCheck('popup status', popupStatus?.isSupportedLaunchPage === true, popupStatus?.statusLabel ?? 'missing'),
         summarizeCheck(
-          'popup-first action behavior',
-          launchConfiguration?.popupPath === 'launcher.html' &&
+          'workspace-first action behavior',
+          launchConfiguration?.popupPath === '' &&
             launchConfiguration?.launcherPath === 'launcher.html' &&
-            launchConfiguration?.openPanelOnActionClick === false,
+            launchConfiguration?.openPanelOnActionClick === true,
           launchConfiguration
             ? `popup=${launchConfiguration.popupPath || 'none'} launcher=${launchConfiguration.launcherPath} openPanelOnActionClick=${String(launchConfiguration.openPanelOnActionClick)}`
             : 'missing launch configuration'
@@ -722,7 +727,7 @@ async function main() {
 
     await sleep(1200);
 
-    const overlay = await readOverlay(session.send, session.getMainContextId);
+    const overlay = await readOverlay(session.send, session.getContentContextId);
     const overlayFollowUpText = 'What should I remember from this page?';
     const overlayFollowUpSubmit = await submitOverlayFollowUp(session.send, session.getContentContextId, overlayFollowUpText);
     let overlayFollowUpStreaming = null;
@@ -779,7 +784,7 @@ async function main() {
         requestId: 'smoke-bootstrap-timeout-overlay-followup'
       });
     }
-    const overlayAfterFollowUp = await readOverlay(session.send, session.getMainContextId);
+    const overlayAfterFollowUp = await readOverlay(session.send, session.getContentContextId);
     const reconnect = await sendRuntimeMessage(session.send, session.getContentContextId, {
       type: 'CANVY_RECONNECT_BACKEND'
     });
@@ -802,9 +807,9 @@ async function main() {
       Math.abs((launcherReopen?.height ?? 0) - storedLauncherWindow.height) <= 2;
       const checks = [
         summarizeCheck(
-          'manifest keeps default action popup',
-          manifest?.action?.default_popup === 'launcher.html',
-          manifest?.action?.default_popup ?? 'none'
+          'manifest action opens workspace sidebar',
+          !manifest?.action?.default_popup && manifest?.side_panel?.default_path === 'sidepanel.html',
+          `popup=${manifest?.action?.default_popup ?? 'none'} sidePanel=${manifest?.side_panel?.default_path ?? 'none'}`
         ),
       summarizeCheck(
         'launcher bundle opens workspace directly',
@@ -817,20 +822,20 @@ async function main() {
         'launcher bundle runtime message path'
       ),
       summarizeCheck(
-        'background keeps popup-first action behavior',
-        backgroundBundle.includes('launcher.html') &&
+        'background keeps workspace-first action behavior',
+        backgroundBundle.includes('sidePanel.open') &&
           backgroundBundle.includes('openPanelOnActionClick') &&
           backgroundBundle.includes('setPopup'),
-        'background popup-first wiring'
+        'background workspace-first wiring'
       ),
       summarizeCheck('backend health', health?.ok === true, `service=${health?.service ?? 'unknown'}`),
       summarizeCheck('content bridge initialized', contentInitialized === true, session.extensionId),
       summarizeCheck('popup status', popupStatus?.isSupportedLaunchPage === true, popupStatus?.statusLabel ?? 'missing'),
       summarizeCheck(
-        'launcher-window action behavior',
-        (launchConfiguration?.popupPath === '' || launchConfiguration?.popupPath === 'launcher.html') &&
+        'workspace-first action behavior',
+        launchConfiguration?.popupPath === '' &&
           launchConfiguration?.launcherPath === 'launcher.html' &&
-          launchConfiguration?.openPanelOnActionClick === false,
+          launchConfiguration?.openPanelOnActionClick === true,
         launchConfiguration
           ? `popup=${launchConfiguration.popupPath || 'none'} launcher=${launchConfiguration.launcherPath} openPanelOnActionClick=${String(launchConfiguration.openPanelOnActionClick)}`
           : 'missing launch configuration'
@@ -844,9 +849,9 @@ async function main() {
         'launcher window stays single-instance',
         launcherOpenAgain?.ok === true &&
           launcherOpenAgain?.windowId === launcherOpen?.windowId &&
-          launchConfigurationAfterOpen?.launcherWindowId === launcherOpen?.windowId,
+          launchConfigurationAfterOpen?.launcherWindowId === launcherReopen?.windowId,
         launcherOpenAgain?.error ??
-          `windowId=${launcherOpenAgain?.windowId ?? 'missing'} launchConfig=${launchConfigurationAfterOpen?.launcherWindowId ?? 'missing'}`
+          `windowId=${launcherOpenAgain?.windowId ?? 'missing'} reopen=${launcherReopen?.windowId ?? 'missing'} launchConfig=${launchConfigurationAfterOpen?.launcherWindowId ?? 'missing'}`
       ),
       summarizeCheck(
         'launch configuration reports live launcher window',

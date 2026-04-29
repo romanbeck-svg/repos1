@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Mako IQ",
-  "description": "Mako IQ is a fast, page-aware Chrome assistant for quick scans, concise answers, and optional expanded workflows.",
+  "description": "Mako IQ analyzes the visible screen and places transparent answer bubbles near detected questions.",
   "version": "0.3.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA44OwfvuUFmWAZkbl/9rvzB160kxkYD0XxYX3MFk7hR9MIve8irJy4tiMwo4LmJdVAZUZ4VhK/9JAEAobGAH9GOVQaQoI2A/tLmYp+KWFwsP+M3CuYbN10UCzjIee8v4pK0+6Ylnwai3g61h59EjyTOHFJCzOPKtXcdQUAHkj57lJv2a1f028bg2i07UO8Sp2o5ooZ35aMJDSMrFaVRxyKzrj6FQlhr3S00+/bLQEqTenc272lDZ1AH54JuYiBA9KcGKUry+Z0B4efcfGKpDZq8WdIoGI+vEVS7ZEv0XENFM6O2VQepvCYmNTxb0GIwPB1iHZaGUL2FTsrZGBJ1fEBQIDAQAB",
-  "permissions": ["storage", "activeTab", "tabs", "scripting", "sidePanel"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": ["storage", "activeTab", "tabs", "scripting", "sidePanel", "webNavigation"],
+  "host_permissions": ["http://127.0.0.1:8787/*", "http://localhost:8787/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -20,8 +20,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Open Mako IQ",
-    "default_popup": "launcher.html",
+    "default_title": "Open Mako IQ Workspace",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -42,7 +41,7 @@
         "default": "Ctrl+Shift+Y",
         "mac": "Command+Shift+Y"
       },
-      "description": "Open the Mako IQ popup"
+      "description": "Open the Mako IQ launcher"
     }
   }
 }

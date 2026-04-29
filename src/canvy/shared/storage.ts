@@ -7,7 +7,6 @@ import type {
   ExtensionState,
   LauncherWindowState,
   PageStatePatch,
-  PageStateSnapshot,
   ScanPagePayload,
   ScanStatus,
   TaskClassification,

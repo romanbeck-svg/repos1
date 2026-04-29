@@ -7,7 +7,7 @@ export async function loadWorkflowState() {
 }
 
 export async function persistWorkflowState(workflowState: WorkflowState) {
-  console.info('[Canvy workflow storage] Persisting workflow state.', {
+  console.info('[Mako IQ workflow storage] Persisting workflow state.', {
     workflowType: workflowState.currentWorkflow,
     currentAction: workflowState.currentAction,
     hasInstructions: Boolean(workflowState.extraInstructions)
@@ -15,7 +15,7 @@ export async function persistWorkflowState(workflowState: WorkflowState) {
   const nextSession = await saveSession({
     workflowState
   });
-  console.info('[Canvy workflow storage] Workflow state persisted.', {
+  console.info('[Mako IQ workflow storage] Workflow state persisted.', {
     workflowType: nextSession.workflowState?.currentWorkflow,
     latestScanId: nextSession.workflowState?.latestScanId
   });
@@ -28,7 +28,7 @@ export async function persistWorkflowInstructions(extraInstructions: string) {
     return null;
   }
 
-  console.info('[Canvy workflow storage] Extra instructions saved.', {
+  console.info('[Mako IQ workflow storage] Extra instructions saved.', {
     hasInstructions: Boolean(extraInstructions.trim()),
     instructionLength: extraInstructions.trim().length
   });
